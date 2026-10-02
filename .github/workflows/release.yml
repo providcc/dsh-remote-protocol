@@ -31,8 +31,6 @@ jobs:
           fetch-depth: 0 # 生成 release notes 需要完整历史
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v4
         with:
