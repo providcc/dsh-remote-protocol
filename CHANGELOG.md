@@ -20,10 +20,23 @@
 - `outbound.pairFail` 的 `reason` 联合里删掉 `'rate_limited'`：线上枚举（`pairFailFrame`）
   从来只有四个值，小程序的 `translatePairFail` 也只有一个四键的中文表——留着它等于允许
   写出一行**必然过不了自家 schema** 的调用。
-- 两处 `String(x ?? '')`（`normalizePairingToken` / `parsePairingUri`）：参数类型就是
-  `string`，那个 `?? ''` 只在替一个违反类型的调用方兜底。
 - `isoOrUndefined` 里 `Number.isNaN(Date.parse(iso))` 那条死分支：`iso` 是上一行
   `new Date(ms).toISOString()` 刚产出的，永远可被 `Date.parse` 认出来。
+
+**一处删错了，被对拍闸门当场抓住**：`normalizePairingToken` 与 `parsePairingUri` 开头那两处
+`String(x ?? '')` 被我当成"替违反类型的调用方兜底"删掉了，于是
+`e2e/protocol.test.mjs` 的"fixtures：配对码归一化两侧相同"立刻红在
+`Cannot read properties of undefined (reading 'replace')` —— 那条 fixture **故意**喂 `undefined`
+（`v.input === null ? undefined : v.input`），要的是两侧同返回 `''`；而小程序侧
+`codec.js:parsePairingQr` 写的就是 `String(text || '')`，本函数的契约也明写着"任何不合法输入
+返回 null"。两处已原样恢复。**记下来**：跨实现比对里的"防御"常常是契约的一条腿，删它之前要先问
+"另一侧怎么处理这个输入"，而不是只看类型。"替违反类型的调用方兜底"删掉了，于是
+`e2e/protocol.test.mjs` 的"fixtures：配对码归一化两侧相同"立刻红在
+`Cannot read properties of undefined (reading 'replace')` —— 那条 fixture **故意**喂 `undefined`
+（`v.input === null ? undefined : v.input`），要的是两侧同返回 `''`；而小程序侧
+`codec.js:parsePairingQr` 写的就是 `String(text || '')`，本函数的契约也明写着"任何不合法输入
+返回 null"。两处已原样恢复。**记下来**：跨实现比对里的"防御"常常是契约的一条腿，删它之前要先问
+"另一侧怎么处理这个输入"，而不是只看类型。
 
 **版本判断**：这些删除**没有记进 `1.0.1`**——那一版唯一的目的是成为第一个带 provenance 的
 发布，标签已经推出去了。按语义化版本，移除公共导出该走 major；但本包在生态里的消费者就是
