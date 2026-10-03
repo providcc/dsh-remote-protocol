@@ -5,7 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
-## [未发布]
+## [1.1.0] - 2026-10-03
+
+### 新增：`ev.model`（当前模型）
+
+小程序顶栏要显示"现在跑的是哪个模型"，于是加了一条载荷 `ev.model`：
+`{ t, model, provider?, canSwitch, options?, reason? }`。
+
+**为什么 `canSwitch` 必须由生产侧显式给出**，而不是让手机看 `options` 有没有值来推断：
+「内核不能换」与「能换但这里没列全」在手机上必须表现不同（置灰并说明原因 vs 可点的列表）。
+推断出来的判断在"清单刚好为空"时会静默错成不可切，而"点了没反应"是最难排查的现象。
+配套的 `outbound.model()` 在 `canSwitch` 为假时**主动把候选吃掉**（不下发 `options` 键），
+因为空数组会让"有候选但都不可选"和"根本没有候选"在手机上一回事。
+
+这一代内核（`agentDefaultModel` 上只有 `currentSelection`）只能读，线上实测
+`modelFace = no-list+no-set`，所以 `canSwitch` 恒为 `false`。字段先立好，
+等内核补上写能力，只改宿主那一侧。
 
 ### 删除（零调用的导出与投机防御）
 
@@ -71,6 +86,7 @@
 - 会话 / 主机 / 命令 id 生成。
 - 跨平台防休眠命令构造器（`caffeinate`、`systemd-inhibit`）。
 
-[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.0.1...HEAD
+[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.1.0
 [1.0.1]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.0.1
 [1.0.0]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.0.0

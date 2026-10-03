@@ -136,6 +136,40 @@ export const evKeepAwakeState = z.object({
   reason: z.string().optional(),
 })
 
+/** 一个可切换的模型候选。`value` 会被手机逐字回传，所以它必须与主机侧的键同名同值。 */
+export const modelOption = z.object({
+  /** 机器名（回传用），例如 `deepseek-chat`。 */
+  value: nonEmpty,
+  /** 给人看的名字；缺省时小程序自己截断 `value`。 */
+  label: z.string().optional(),
+  provider: z.string().optional(),
+})
+export type ModelOption = z.infer<typeof modelOption>
+
+/**
+ * 当前模型。
+ *
+ * 为什么要显式带 `canSwitch`，而不是让手机看`options` 有没有值来推断：
+ * 「内核不能换」和「内核能换但这里没列全」在手机上必须表现不同 ——
+ * 前者下拉要置灰并说明原因，后者是可点的列表。一个字段省掉，代价是
+ * 「点了没反应」这个最难排查的现象。
+ *
+ * **这一代内核只能读**（`agentDefaultModel` 上只有 `currentSelection`），
+ * 所以线上 `canSwitch` 是 `false`、`options` 为空。字段先立好，
+ * 内核补上写能力后只改宿主那一侧。
+ */
+export const evModel = z.object({
+  t: z.literal('ev.model'),
+  provider: nonEmpty.optional(),
+  model: nonEmpty,
+  /** 主机能不能换。false 时小程序**不许**渲染成可点的下拉。 */
+  canSwitch: z.boolean(),
+  /** 候选清单；`canSwitch` 为 true 时至少一项。 */
+  options: z.array(modelOption).optional(),
+  /** 不能切时给手机一句人话，直接显示，不要让小程序自己编措辞。 */
+  reason: z.string().optional(),
+})
+
 export const evResult = z.object({
   t: z.literal('ev.result'),
   cmdId: z.string(),
@@ -194,6 +228,8 @@ export type EvQuestionRequest = z.infer<typeof evQuestionRequest>
 export type EvRunState = z.infer<typeof evRunState>
 /** evKeepAwakeState 的推导类型。 */
 export type EvKeepAwakeState = z.infer<typeof evKeepAwakeState>
+/** evModel 的推导类型。 */
+export type EvModel = z.infer<typeof evModel>
 /** evResult 的推导类型。 */
 export type EvResult = z.infer<typeof evResult>
 /** evSessionHistory 的推导类型。 */
@@ -227,6 +263,7 @@ export const evPayload = z.discriminatedUnion('t', [
   evQuestionRequest,
   evRunState,
   evKeepAwakeState,
+  evModel,
   evResult,
   evSessionHistory,
 ])
@@ -373,6 +410,7 @@ export const PAYLOAD_TYPES = {
   evQuestionRequest: 'ev.question_request',
   evRunState: 'ev.run_state',
   evKeepAwakeState: 'ev.keep_awake_state',
+  evModel: 'ev.model',
   evResult: 'ev.result',
   evSessionHistory: 'ev.session_history',
 } as const

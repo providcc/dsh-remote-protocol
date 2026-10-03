@@ -20,6 +20,7 @@ import {
   type ChoiceOption,
   type EvKeepAwakeState,
   type EvMessageDelta,
+  type EvModel,
   type EvPayload,
   type EvPermissionRequest,
   type EvQuestionRequest,
@@ -29,6 +30,7 @@ import {
   type EvSessionHistory,
   type EvToolEvent,
   type HistoryItem,
+  type ModelOption,
   type QuestionItem,
   type SessionSummary,
   PAYLOAD_TYPES,
@@ -157,6 +159,28 @@ export function keepAwakeState(args: {
   reason?: string
 }): EvKeepAwakeState {
   return { t: PAYLOAD_TYPES.evKeepAwakeState, ...args }
+}
+
+/**
+ * 当前模型。
+ *
+ * **`canSwitch` 必须由生产侧显式给出**，不许让手机从 `options` 有没有值去推断：
+ * 「内核不能换」与「能换但清单为空」在手机上必须表现不同（置灰 vs 可点），
+ * 推断出来的判断在"清单刚好为空"时会静默错成不可切。
+ */
+export function model(args: {
+  model: string
+  canSwitch: boolean
+  provider?: string
+  options?: ModelOption[]
+  reason?: string
+}): EvModel {
+  const payload: EvModel = { t: PAYLOAD_TYPES.evModel, model: args.model, canSwitch: args.canSwitch }
+  if (args.provider !== undefined) payload.provider = args.provider
+  // 不可切时**不下发**候选：空数组会让"有候选但都不可选"和"没有候选"在手机上一回事。
+  if (args.canSwitch && args.options?.length) payload.options = args.options
+  if (args.reason !== undefined) payload.reason = args.reason
+  return payload
 }
 
 export type EvResultExtras = { message?: string; data?: Record<string, unknown> }

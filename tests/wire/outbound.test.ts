@@ -18,6 +18,7 @@ import {
   keepAwakeState,
   makeError,
   messageDelta,
+  model,
   paired,
   pairFail,
   pairReady,
@@ -95,12 +96,39 @@ test('出站载荷都能被解析，且字段名与 schema 一致', () => {
       questions: [{ id: 'q1', question: '选哪个环境？', options: [{ id: 'staging', label: '预发' }] }],
     }),
     runState({ state: 'idle', detail: 'interrupted', sessionId: 'ses_1' }),
+    model({ model: 'deepseek-chat', canSwitch: false, reason: '这一代内核只能读当前模型' }),
+    model({
+      model: 'deepseek-chat',
+      canSwitch: true,
+      provider: 'deepseek',
+      options: [{ value: 'deepseek-chat', label: 'DeepSeek Chat' }],
+    }),
     result('c1', true, { data: { sessions: [] } }),
     result('', false, { message: '载荷处理失败' }),
   ]
   for (const payload of payloads) {
     assert.notEqual(parseEvPayload(payload), null, `${payload.t} 不合法`)
   }
+})
+
+test('model：canSwitch=false 时不下发候选（空数组会让两种"不能切"在手机上一回事）', () => {
+  const readOnly = model({
+    model: 'deepseek-chat',
+    canSwitch: false,
+    options: [{ value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' }],
+    reason: '这一代内核只能读当前模型',
+  })
+  assert.deepEqual(keysOf(readOnly), ['canSwitch', 'model', 'reason', 't'], '候选被构造器吃掉了')
+  assert.notEqual(parseEvPayload(readOnly), null)
+
+  // 空清单同理：canSwitch=true 却没有候选，手机会渲染出一个点的下拉。
+  const empty = model({ model: 'deepseek-chat', canSwitch: true, options: [] })
+  assert.equal('options' in empty, false)
+})
+
+test('model：sessionId 一个都不许带（模型是全局的，不属于任何会话）', () => {
+  const m = model({ model: 'deepseek-chat', canSwitch: false, provider: 'deepseek' })
+  assert.equal('sessionId' in m, false)
 })
 
 test('makeError：message 缺席时不留空键（否则对侧会读到 undefined 文案）', () => {
