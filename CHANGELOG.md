@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [未发布]
+
+### 修复
+
+- **`tsconfig.json` 补上 `"types": ["node"]`，解 TypeScript 7 的编译不通过**。
+  TS7 不再把 `@types/node` 自动纳进来，于是本仓在 `typescript@7.0.2` 下报 **40 个错**
+  （`Cannot find name 'node:crypto'` / `'TextEncoder'` / `'Buffer'` / `'URLSearchParams'`…，
+  另有几条 `possibly 'null'` 是这些类型缺失的下游）。这一行加完 **0 个错**，
+  而本仓自己的 TypeScript 5.9 行为不变（`pnpm typecheck` 与 82 项测试都照旧绿）。
+  动机是 Dependabot 那个 `chore(deps): bump typescript from 5.9.3 to 7.0.2` 一直红着；
+  它红在装依赖之前（`ERR_PNPM_BAD_PM_VERSION`，PR 分支基线陈旧），所以这条修复**在 CI 上
+  要等分支更新到最新 main 之后才看得见**。
+
 ## [1.1.0] - 2026-10-03
 
 ### 新增：`ev.model`（当前模型）
