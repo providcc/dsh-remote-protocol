@@ -7,6 +7,18 @@
 
 ## [未发布]
 
+## [1.0.1] - 2026-10-03
+
+### 变更
+
+- **没有代码变更**，这一版唯一的目的是成为**第一个带 provenance 的发布**。
+  `1.0.0` 是用 npm 的 Automation token 发的：pnpm 先试 OIDC，换票拿到 404 后**静默回落**成
+  token 发布，于是包发出去了、工作流也绿了，但 `/-/npm/v1/attestations/dsh-remote-wire@1.0.0`
+  是 Not found。已发布出去的版本永远补不上 attestation（npm 侧既定行为），所以只能往前发一版。
+- 发布凭据改为 **GitHub OIDC / Trusted Publishing**：Release 工作流的 Publish 步骤不再设
+  `NODE_AUTH_TOKEN`（token 在场就会掩盖 OIDC 失败），并新增一步 `Verify provenance landed`
+  ——发布后 60s 内查不到 attestation 就让工作流红，并直接把配置命令印在报错里。
+
 ## [1.0.0] - 2026-10-03
 
 ### 新增
@@ -20,5 +32,6 @@
 - 会话 / 主机 / 命令 id 生成。
 - 跨平台防休眠命令构造器（`caffeinate`、`systemd-inhibit`）。
 
-[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.0.0...HEAD
+[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/providcc/dsh-remote-protocol/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.0.0

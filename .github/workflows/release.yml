@@ -62,11 +62,37 @@ jobs:
           echo "版本一致：$pkg"
 
       # prepare 脚本会在发布前重新构建 dist，`publishConfig.provenance` 打开 provenance 证明。
-      # 仓库需要配置 NPM_TOKEN secret（Automation 类型 token）。
+      # 凭据走 **GitHub OIDC**：npm 侧要有一条指向本仓 `release.yml` 的 Trusted Publishing 配置
+      # （`npm trust github dsh-remote-wire --repo providcc/dsh-remote-protocol --file release.yml --allow-publish`），
+      # 不再需要 `NPM_TOKEN` secret。下一步的 "Verify provenance landed" 就是这条配置的体检。
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # 刻意**不设 NODE_AUTH_TOKEN**：pnpm 在有 token 时会先试 OIDC、换票失败就静默回落到
+        # token 发布——表现是"版本发出去了、工作流也是绿的、attestation 一个没有"，
+        # 日志里只留一行 `Skipped OIDC: ERR_PNPM_AUTH_TOKEN_EXCHANGE … 404`（1.0.0 就是这么发的）。
+        # 把 token 拿掉之后 OIDC 是唯一路径，Trusted Publishing 没配好就直接红，红得看得见。
         run: pnpm publish --access public --no-git-checks
+
+      # 发完必须**独立验一次 provenance**：工作流绿不等于带 attestation（见上那条回落）。
+      # 注册表侧的 attestation 落地有秒级延迟，所以这里重试到 60s 为止，超时就红。
+      - name: Verify provenance landed
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -e
+          version="${TAG_NAME#v}"
+          url="https://registry.npmjs.org/-/npm/v1/attestations/dsh-remote-wire@${version}"
+          for i in $(seq 1 20); do
+            body="$(curl -s "$url" || true)"
+            if printf '%s' "$body" | grep -q '"attestations"'; then
+              echo "provenance 已挂上：dsh-remote-wire@${version}"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "发布后 60s 仍查不到 dsh-remote-wire@${version} 的 attestation。" >&2
+          echo "多半是这个包还没配 Trusted Publishing（或配的 workflow 文件名不是 release.yml）。" >&2
+          echo "配法：npm trust github dsh-remote-wire --repo providcc/dsh-remote-protocol --file release.yml --allow-publish" >&2
+          exit 1
 
       - name: Create GitHub Release
         env:
