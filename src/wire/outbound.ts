@@ -23,6 +23,7 @@ import {
   type EvModel,
   type EvPayload,
   type EvPermissionRequest,
+  type EvPermissionResolved,
   type EvQuestionRequest,
   type EvResult,
   type EvRunState,
@@ -133,6 +134,18 @@ export function permissionRequest(args: {
   sessionId?: string
 }): EvPermissionRequest {
   return { t: PAYLOAD_TYPES.evPermissionRequest, ...args }
+}
+
+/**
+ * 收回一张已经不必回答的审批卡（见 `evPermissionResolved` 的注释：桌面与手机同时被问，
+ * 谁先答谁算，**输的那一侧要主动收**，不许让它对着一个已关闭的请求继续倒计时、继续可点）。
+ */
+export function permissionResolved(args: {
+  requestId: string
+  sessionId?: string
+  by?: 'desktop' | 'cancelled'
+}): EvPermissionResolved {
+  return { t: PAYLOAD_TYPES.evPermissionResolved, ...args }
 }
 
 export function questionRequest(args: {

@@ -31,6 +31,7 @@ import {
   sessionHistory,
   toolEvent,
   permissionRequest,
+  permissionResolved,
   questionRequest,
 } from '../../src/wire/outbound.js'
 
@@ -91,6 +92,9 @@ test('出站载荷都能被解析，且字段名与 schema 一致', () => {
     messageDelta({ messageId: 'm2', delta: '', done: true }),
     toolEvent({ callId: 'c1', phase: 'started', tool: 'bash' }),
     permissionRequest({ requestId: 'r1', action: '执行 bash', options: [{ id: 'approve', label: '允许' }] }),
+    // 桌面与手机同时被问之后，"收回那张卡"成了出站面上的一等公民，所以它也得走同一条自证往返。
+    permissionResolved({ requestId: 'r1', sessionId: 'ses_1', by: 'desktop' }),
+    permissionResolved({ requestId: 'r1' }),
     questionRequest({
       requestId: 'r1',
       questions: [{ id: 'q1', question: '选哪个环境？', options: [{ id: 'staging', label: '预发' }] }],

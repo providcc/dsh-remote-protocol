@@ -247,6 +247,21 @@ test('事件：keep_awake_state 的四个必填字段一个都不能少（手机
   assert.equal('sessionId' in stripped, false, 'sessionId 会被剥掉：这个 payload 按契约不带会话归属（F11）')
 })
 
+test('ev.permission_resolved：收回卡片只认 requestId，by 可选但不许是别的词', () => {
+  // 没有 requestId 就收不了任何一张卡——手机是靠它对上号的，所以这条必须红。
+  assert.equal(parseEvPayload({ t: 'ev.permission_resolved' }), null)
+  assert.ok(
+    parseEvPayload({ t: 'ev.permission_resolved', requestId: 'r1' }),
+    '只给 requestId 就该成立（老宿主不知道 by）',
+  )
+  assert.ok(parseEvPayload({ t: 'ev.permission_resolved', requestId: 'r1', sessionId: 's', by: 'desktop' }))
+  assert.equal(
+    parseEvPayload({ t: 'ev.permission_resolved', requestId: 'r1', by: 'approved' }),
+    null,
+    'by 是"谁收的场"，不是审批结果；放开取值会让手机那边要维护一张语义表',
+  )
+})
+
 test('事件：permission/question 的 requestId 与 questions[].id 是回传映射的锚', () => {
   assert.equal(parseEvPayload({ t: 'ev.permission_request', action: '执行 bash' }), null)
   assert.ok(

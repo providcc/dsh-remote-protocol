@@ -103,6 +103,26 @@ export const evPermissionRequest = z.object({
   expiresAt: z.string().optional(),
 })
 
+/**
+ * 「这张审批卡不用答了」——桌面那一位先答了，或者这次请求本身被撤回。
+ *
+ * 为什么必须有：主机现在**同时**问桌面和手机（谁先答谁算，插件不许改变宿主自己的行为）。
+ * 手机先答时，桌面那张会留到这次工具调用的生命周期结束——那是宿主自己的 `signal` 在收尾，
+ * 插件碰不到，只能接受；但**反过来不能靠手机自己超时**：桌面上有人点了之后，
+ * 手机那张卡的倒计时还在走、按钮还能点，点下去是对着一个已经关闭的请求做写操作。
+ * 所以输的那一侧必须被明确收回。
+ *
+ * 老版本的小程序收到不认识的 `t` 会**静默忽略**（分发是一串 `if (p.t === …)`），
+ * 所以这一帧可以先于小程序那半上线，不会把谁钉死。
+ */
+export const evPermissionResolved = z.object({
+  t: z.literal('ev.permission_resolved'),
+  requestId: nonEmpty,
+  sessionId: nonEmpty.optional(),
+  /** 谁收的场。手机只按"要不要收掉这张卡"读它，所以不做必填。 */
+  by: z.enum(['desktop', 'cancelled']).optional(),
+})
+
 const questionItem = z.object({
   id: nonEmpty,
   question: nonEmpty,
@@ -222,6 +242,8 @@ export type EvMessageDelta = z.infer<typeof evMessageDelta>
 export type EvToolEvent = z.infer<typeof evToolEvent>
 /** evPermissionRequest 的推导类型。 */
 export type EvPermissionRequest = z.infer<typeof evPermissionRequest>
+/** evPermissionResolved 的推导类型。 */
+export type EvPermissionResolved = z.infer<typeof evPermissionResolved>
 /** evQuestionRequest 的推导类型。 */
 export type EvQuestionRequest = z.infer<typeof evQuestionRequest>
 /** evRunState 的推导类型。 */
@@ -260,6 +282,7 @@ export const evPayload = z.discriminatedUnion('t', [
   evMessageDelta,
   evToolEvent,
   evPermissionRequest,
+  evPermissionResolved,
   evQuestionRequest,
   evRunState,
   evKeepAwakeState,
@@ -407,6 +430,7 @@ export const PAYLOAD_TYPES = {
   evMessageDelta: 'ev.message_delta',
   evToolEvent: 'ev.tool_event',
   evPermissionRequest: 'ev.permission_request',
+  evPermissionResolved: 'ev.permission_resolved',
   evQuestionRequest: 'ev.question_request',
   evRunState: 'ev.run_state',
   evKeepAwakeState: 'ev.keep_awake_state',
