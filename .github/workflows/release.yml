@@ -66,14 +66,32 @@ jobs:
       # （`npm trust github dsh-remote-wire --repo providcc/dsh-remote-protocol --file release.yml --allow-publish`），
       # 不再需要 `NPM_TOKEN` secret。下一步的 "Verify provenance landed" 就是这条配置的体检。
       - name: Publish to npm
-        # 刻意**不设 NODE_AUTH_TOKEN**：pnpm 在有 token 时会先试 OIDC、换票失败就静默回落到
-        # token 发布——表现是"版本发出去了、工作流也是绿的、attestation 一个没有"，
-        # 日志里只留一行 `Skipped OIDC: ERR_PNPM_AUTH_TOKEN_EXCHANGE … 404`（1.0.0 就是这么发的）。
-        # 把 token 拿掉之后 OIDC 是唯一路径，Trusted Publishing 没配好就直接红，红得看得见。
-        run: pnpm publish --access public --no-git-checks
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          # **显式清空**，不是"不设"：`actions/setup-node` 一旦收到 `registry-url`，就会把它的
+          # `token` 输入（默认值是 `github.token`）写进 `NODE_AUTH_TOKEN`，并往 `$NPM_CONFIG_USERCONFIG`
+          # 里落一句 `_authToken=${NODE_AUTH_TOKEN}`——那一句就是 pnpm 静默回落成 token 发布的入口
+          # （表现是"版本发出去了、工作流也是绿的、attestation 一个没有"，日志里只留一行
+          # `Skipped OIDC: ERR_PNPM_AUTH_TOKEN_EXCHANGE … 404`；1.0.0 就是这么发的）。
+          # GITHUB_TOKEN 本身不是 npm 凭据，所以回落只会 401；但把"没有 token 这条路"写成
+          # 一个赋值，比依赖"将来也没人往这里塞真 token"结实。清空之后 OIDC 是唯一路径，
+          # Trusted Publishing 没配好就直接红，红得看得见。
+          NODE_AUTH_TOKEN: ''
+        # **幂等**：这个版本号如果已经在注册表里，就跳过 publish 而不是让它 403。
+        # 2026-10-03 发 `1.0.1` 时 Publish 成功、attestation 也在，但下一步 60s 的轮询先放弃
+        # 把作业判红，于是 `Create GitHub Release` 整个没跑——而版本号不可复用，重跑工作流
+        # 只会撞 403。跳过之后那条 Release 还能补上，且"发了包没公告"这种半状态能自愈。
+        run: |
+          set -e
+          version="${TAG_NAME#v}"
+          if [ -n "$(npm view "dsh-remote-wire@${version}" version 2>/dev/null || true)" ]; then
+            echo "dsh-remote-wire@${version} 已经在注册表里：跳过 publish，往下建 Release"
+            exit 0
+          fi
+          pnpm publish --access public --no-git-checks
 
       # 发完必须**独立验一次 provenance**：工作流绿不等于带 attestation（见上那条回落）。
-      # 注册表侧的 attestation 落地有秒级延迟，所以这里重试到 60s 为止，超时就红。
+      # ⚠️ 窗口给到**几分钟**：60s 那次把"已经挂上 attestation 的发布"判成红（见上一步的注释）。
       - name: Verify provenance landed
         env:
           TAG_NAME: ${{ github.ref_name }}
@@ -81,17 +99,19 @@ jobs:
           set -e
           version="${TAG_NAME#v}"
           url="https://registry.npmjs.org/-/npm/v1/attestations/dsh-remote-wire@${version}"
-          for i in $(seq 1 20); do
+          for i in $(seq 1 40); do
             body="$(curl -s "$url" || true)"
             if printf '%s' "$body" | grep -q '"attestations"'; then
-              echo "provenance 已挂上：dsh-remote-wire@${version}"
+              echo "provenance 已挂上：dsh-remote-wire@${version}（第 ${i} 次轮询）"
               exit 0
             fi
-            sleep 3
+            sleep 5
           done
-          echo "发布后 60s 仍查不到 dsh-remote-wire@${version} 的 attestation。" >&2
-          echo "多半是这个包还没配 Trusted Publishing（或配的 workflow 文件名不是 release.yml）。" >&2
-          echo "配法：npm trust github dsh-remote-wire --repo providcc/dsh-remote-protocol --file release.yml --allow-publish" >&2
+          echo "发布后 200s 仍查不到 dsh-remote-wire@${version} 的 attestation。" >&2
+          echo "先别重发：**版本号一旦发出去就永远不可复用**，重发只会撞 403 或发出另一个号。" >&2
+          echo "也可能只是注册表侧延迟——手工复核一次：curl -s '$url'" >&2
+          echo "确实没有，才是 Trusted Publishing 没配好（或配的 workflow 文件名不是 release.yml）：" >&2
+          echo "  npm trust github dsh-remote-wire --repo providcc/dsh-remote-protocol --file release.yml --allow-publish" >&2
           exit 1
 
       - name: Create GitHub Release

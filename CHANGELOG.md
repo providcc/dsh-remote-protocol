@@ -30,12 +30,6 @@
 （`v.input === null ? undefined : v.input`），要的是两侧同返回 `''`；而小程序侧
 `codec.js:parsePairingQr` 写的就是 `String(text || '')`，本函数的契约也明写着"任何不合法输入
 返回 null"。两处已原样恢复。**记下来**：跨实现比对里的"防御"常常是契约的一条腿，删它之前要先问
-"另一侧怎么处理这个输入"，而不是只看类型。"替违反类型的调用方兜底"删掉了，于是
-`e2e/protocol.test.mjs` 的"fixtures：配对码归一化两侧相同"立刻红在
-`Cannot read properties of undefined (reading 'replace')` —— 那条 fixture **故意**喂 `undefined`
-（`v.input === null ? undefined : v.input`），要的是两侧同返回 `''`；而小程序侧
-`codec.js:parsePairingQr` 写的就是 `String(text || '')`，本函数的契约也明写着"任何不合法输入
-返回 null"。两处已原样恢复。**记下来**：跨实现比对里的"防御"常常是契约的一条腿，删它之前要先问
 "另一侧怎么处理这个输入"，而不是只看类型。
 
 **版本判断**：这些删除**没有记进 `1.0.1`**——那一版唯一的目的是成为第一个带 provenance 的
@@ -44,22 +38,25 @@
 `1.1.0` 记，并在正文里写明"外部若依赖这些名字请锁 `1.0.0`"。要改成 `2.0.0` 就得同时抬
 两个消费仓的依赖范围。
 
+## [1.0.1] - 2026-10-03
+
 ### 变更
 
-- **`1.0.1` 已备好但还没发出去**：版本号已抬到 1.0.1、标签 `v1.0.1` 已推，2026-10-03 第一次
-  Release 运行**红在 `Publish to npm`**，日志是
-  `Skipped OIDC: ERR_PNPM_AUTH_TOKEN_EXCHANGE … (status code 404)` —— 即 npm 侧那条
-  Trusted Publishing 还不存在。注册表上仍然只有 `1.0.0`，**没有半发布**：Publish 是唯一的网络写步骤，
-  它一失败就不会往下建 GitHub Release。这正是"从这一步删掉 `NODE_AUTH_TOKEN`"换来的行为——
-  以前会静默发一个没 attestation 的版本，现在是响亮地失败。TP 配好后不必重打标签，重跑那次失败作业即可。
-- `1.0.1` 这个版本本身**不含代码变更**（上面那批删除在 `[未发布]`，不在它里面），
-  它唯一的目的是成为**第一个带 provenance 的发布**。
-  `1.0.0` 是用 npm 的 Automation token 发的：pnpm 先试 OIDC，换票拿到 404 后**静默回落**成
+- **这一版不含代码变更**：它唯一的目的是成为**第一个带 provenance 的发布**。
+  `1.0.0` 是用 npm 的 Automation token 发的——pnpm 先试 OIDC，换票拿到 404 后**静默回落**成
   token 发布，于是包发出去了、工作流也绿了，但 `/-/npm/v1/attestations/dsh-remote-wire@1.0.0`
   是 Not found。已发布出去的版本永远补不上 attestation（npm 侧既定行为），所以只能往前发一版。
-- 发布凭据改为 **GitHub OIDC / Trusted Publishing**：Release 工作流的 Publish 步骤不再设
-  `NODE_AUTH_TOKEN`（token 在场就会掩盖 OIDC 失败），并新增一步 `Verify provenance landed`
-  ——发布后 60s 内查不到 attestation 就让工作流红，并直接把配置命令印在报错里。
+- 发布凭据改为 **GitHub OIDC / Trusted Publishing**，并新增一步 `Verify provenance landed`
+  独立体检。**`1.0.1` 现在是带 attestation 的**：
+  `curl https://registry.npmjs.org/-/npm/v1/attestations/dsh-remote-wire@1.0.1` 回的是真证书。
+- ⚠️ **第一次 Release 运行"红"是假红，别照着它重发**：`Publish to npm` 步骤**成功**了，
+  红的是自检那一步——窗口只有 60s（20×3s），attestation 落地比它慢。后果不是包没发出去，
+  而是排在它后面的 `Create GitHub Release` 被 skip，于是"有包没公告"。
+  修法两条都已落进工作流：窗口抬到 200s，`Publish` 步骤改成**版本号已在注册表就跳过**
+  （版本号一旦发出就永远不可复用，重跑只会撞 403）。
+  同一次排查还纠正了一条写进注释的事实：`NODE_AUTH_TOKEN` 从来不是"没设"——
+  `actions/setup-node` 收到 `registry-url` 就会把它的 `token` 输入（默认 = `github.token`）
+  写进去。现在 Publish 步骤把它**显式清空**，"没有 token 这条路"才成为一个赋值而不是一句希望。
 
 ## [1.0.0] - 2026-10-03
 
@@ -74,5 +71,6 @@
 - 会话 / 主机 / 命令 id 生成。
 - 跨平台防休眠命令构造器（`caffeinate`、`systemd-inhibit`）。
 
-[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.0.0...HEAD
+[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.0.1
 [1.0.0]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.0.0
