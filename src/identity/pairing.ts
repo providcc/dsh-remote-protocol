@@ -57,7 +57,7 @@ export function formatPairingToken(n: number): string {
  * 与小程序 `normalizePairingToken` 同语义（只剔这两类字符，别的不动）。
  */
 export function normalizePairingToken(raw: string): string {
-  return String(raw ?? '').replace(/[\s-]/g, '')
+  return raw.replace(/[\s-]/g, '')
 }
 
 /** 构造配对 URI。`token` 省略时不写 `t` 参数（扫码后仍需手输码）。 */
@@ -77,11 +77,10 @@ export function buildPairingUri(info: { server: string; psk: string; hostLabel?:
  * 页面据此弹「无法识别」）。
  */
 export function parsePairingUri(text: string): PairingInfo | null {
-  const raw = String(text ?? '')
-  if (!raw.startsWith(URI_PREFIX)) return null
-  const cut = raw.indexOf('?')
+  if (!text.startsWith(URI_PREFIX)) return null
+  const cut = text.indexOf('?')
   if (cut < 0) return null
-  const params = readQuery(raw.slice(cut + 1))
+  const params = readQuery(text.slice(cut + 1))
   const psk = params.get('psk') ?? ''
   const server = params.get('s') ?? ''
   if (!psk || !server) return null

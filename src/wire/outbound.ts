@@ -58,19 +58,13 @@ export function paired(sessionId: string, hostId: string): RelayOutbound {
   return { t: 'paired', sessionId, hostId }
 }
 
-export function pairFail(
-  reason: 'invalid_or_expired' | 'already_used' | 'host_offline' | 'bad_token' | 'rate_limited',
-): RelayOutbound {
+export function pairFail(reason: 'invalid_or_expired' | 'already_used' | 'host_offline' | 'bad_token'): RelayOutbound {
   return { t: 'pair-fail', reason }
 }
 
 /** 发给主机的加入通知必须带 pairingToken（主机按它取 PSK）；发给客户端的不带。 */
 export function peerJoinedForHost(sessionId: string, clientId: string, pairingToken: string): RelayOutbound {
   return { t: 'peer-joined', sessionId, clientId, pairingToken }
-}
-
-export function peerJoinedNotice(sessionId: string, hostId: string): RelayOutbound {
-  return { t: 'peer-joined', sessionId, clientId: hostId }
 }
 
 /**
@@ -202,5 +196,3 @@ export function sessionHistory(args: {
     ...(nextBeforeSeq === undefined ? {} : { nextBeforeSeq }),
   }
 }
-
-export type OutboundPayload = EvPayload

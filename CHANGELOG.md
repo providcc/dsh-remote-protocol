@@ -7,6 +7,30 @@
 
 ## [未发布]
 
+### 删除（零调用的导出与投机防御）
+
+按"没用的就删，用到再重写"过了一遍三个消费者（中继、宿主插件、小程序对拍）之后：
+
+- 零调用导出：`DEFAULT_RELAY_PORT`、`looksLikeConversationId`、`isEncFrame`、
+  `parseEndpointFrameText`、`makeEncFrame`、`makeEncBatchFrame`、`frames.ts` 里那份与
+  `outbound.makeError` 重复的 `makeErrorFrame`、`outbound.peerJoinedNotice`、
+  `OutboundPayload`。README 从未列过这些名字，`e2e/protocol.test.mjs` 的 18 条对拍全绿。
+- `pair-begin` 的可选字段 `hostLabel`：唯一生产者（宿主插件 `relay.ts`）从不发它，
+  中继也不读；小程序那个 `hostLabel` 来自配对 URI，不是这条帧。
+- `outbound.pairFail` 的 `reason` 联合里删掉 `'rate_limited'`：线上枚举（`pairFailFrame`）
+  从来只有四个值，小程序的 `translatePairFail` 也只有一个四键的中文表——留着它等于允许
+  写出一行**必然过不了自家 schema** 的调用。
+- 两处 `String(x ?? '')`（`normalizePairingToken` / `parsePairingUri`）：参数类型就是
+  `string`，那个 `?? ''` 只在替一个违反类型的调用方兜底。
+- `isoOrUndefined` 里 `Number.isNaN(Date.parse(iso))` 那条死分支：`iso` 是上一行
+  `new Date(ms).toISOString()` 刚产出的，永远可被 `Date.parse` 认出来。
+
+**版本判断**：这些删除**没有记进 `1.0.1`**——那一版唯一的目的是成为第一个带 provenance 的
+发布，标签已经推出去了。按语义化版本，移除公共导出该走 major；但本包在生态里的消费者就是
+本仓那三个（都是 `^1.0.0`），且被删的名字从未出现在 README 的模块清单里，所以这里按
+`1.1.0` 记，并在正文里写明"外部若依赖这些名字请锁 `1.0.0`"。要改成 `2.0.0` 就得同时抬
+两个消费仓的依赖范围。
+
 ### 变更
 
 - **`1.0.1` 已备好但还没发出去**：版本号已抬到 1.0.1、标签 `v1.0.1` 已推，2026-10-03 第一次
@@ -15,7 +39,8 @@
   Trusted Publishing 还不存在。注册表上仍然只有 `1.0.0`，**没有半发布**：Publish 是唯一的网络写步骤，
   它一失败就不会往下建 GitHub Release。这正是"从这一步删掉 `NODE_AUTH_TOKEN`"换来的行为——
   以前会静默发一个没 attestation 的版本，现在是响亮地失败。TP 配好后不必重打标签，重跑那次失败作业即可。
-- **没有代码变更**，这一版唯一的目的是成为**第一个带 provenance 的发布**。
+- `1.0.1` 这个版本本身**不含代码变更**（上面那批删除在 `[未发布]`，不在它里面），
+  它唯一的目的是成为**第一个带 provenance 的发布**。
   `1.0.0` 是用 npm 的 Automation token 发的：pnpm 先试 OIDC，换票拿到 404 后**静默回落**成
   token 发布，于是包发出去了、工作流也绿了，但 `/-/npm/v1/attestations/dsh-remote-wire@1.0.0`
   是 Not found。已发布出去的版本永远补不上 attestation（npm 侧既定行为），所以只能往前发一版。

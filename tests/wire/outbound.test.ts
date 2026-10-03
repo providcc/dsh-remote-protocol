@@ -22,7 +22,6 @@ import {
   pairFail,
   pairReady,
   peerJoinedForHost,
-  peerJoinedNotice,
   peerLeft,
   pong,
   result,
@@ -44,7 +43,6 @@ test('每条出站控制帧都能被对侧的 schema 解出来（自证往返）
     paired('c_a1b2c3d4e5f6', 'h1'),
     pairFail('already_used'),
     peerJoinedForHost('c_a1b2c3d4e5f6', 'inst-1', '123456'),
-    peerJoinedNotice('c_a1b2c3d4e5f6', 'h1'),
     peerLeft('c_a1b2c3d4e5f6', 'h1'),
     makeError('unknown_session'),
     makeError('bad_frame', 'binary frames are not supported'),
@@ -68,9 +66,8 @@ test('F4：paired 必带 sessionId；pair-ready 必带正整数 ttlMs', () => {
   assert.deepEqual(keysOf(pairReady('123456', 90_000)), ['pairingToken', 't', 'ttlMs'])
 })
 
-test('旧事故：给主机的 peer-joined 带 pairingToken，给客户端的那条不带', () => {
+test('旧事故：给主机的 peer-joined 带 pairingToken（客户端那一条由中继自己写，不带 token）', () => {
   assert.deepEqual(keysOf(peerJoinedForHost('c_x', 'i', '123456')), ['clientId', 'pairingToken', 'sessionId', 't'])
-  assert.deepEqual(keysOf(peerJoinedNotice('c_x', 'h')), ['clientId', 'sessionId', 't'])
 })
 
 test('F11：两个"无会话归属"的载荷里不存在 sessionId 这条路', () => {

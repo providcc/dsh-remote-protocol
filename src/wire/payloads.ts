@@ -387,8 +387,7 @@ export const PAYLOAD_TYPES = {
 export function isoOrUndefined(value: unknown): string | undefined {
   if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return value
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const iso = new Date(value).toISOString()
-    return Number.isNaN(Date.parse(iso)) ? undefined : iso
+    return new Date(value).toISOString()
   }
   return undefined
 }
