@@ -25,6 +25,7 @@ import {
   type EvPermissionRequest,
   type EvPermissionResolved,
   type EvQuestionRequest,
+  type EvQuestionResolved,
   type EvResult,
   type EvRunState,
   type EvSessionChanged,
@@ -151,9 +152,25 @@ export function permissionResolved(args: {
 export function questionRequest(args: {
   requestId: string
   questions: QuestionItem[]
+  expiresAt?: string
   sessionId?: string
 }): EvQuestionRequest {
   return { t: PAYLOAD_TYPES.evQuestionRequest, ...args }
+}
+
+/**
+ * 收回一张已经不必回答的提问卡（与 `permissionResolved` 同一条理由：两端同时问、
+ * 谁先答谁算，输的那一侧要主动收）。
+ *
+ * 提问这张卡**本来没有任何倒计时**（`ev.question_request` 今天才补上 `expiresAt`），
+ * 所以对它来说这一帧不是"提前收卡"，而是唯一一条能让它消失的路径之一。
+ */
+export function questionResolved(args: {
+  requestId: string
+  sessionId?: string
+  by?: 'desktop' | 'cancelled'
+}): EvQuestionResolved {
+  return { t: PAYLOAD_TYPES.evQuestionResolved, ...args }
 }
 
 export function runState(args: { state: 'running' | 'idle'; detail?: string; sessionId?: string }): EvRunState {

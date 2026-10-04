@@ -297,6 +297,28 @@ test('事件：permission/question 的 requestId 与 questions[].id 是回传映
   assert.equal(parseEvPayload({ t: 'ev.question_request', requestId: 'q', questions: [{}] }), null)
 })
 
+test('ev.question_request 的 expiresAt 是可选的：老宿主不发，手机就不许显示"undefined 秒"', () => {
+  const base = { t: 'ev.question_request', requestId: 'q', questions: [{ id: 'q1', question: '要哪个？' }] }
+  assert.ok(parseEvPayload(base), '不带 expiresAt 必须仍然成立（这一帧刚补这个字段，宿主两侧不会同时升级）')
+  assert.ok(parseEvPayload({ ...base, expiresAt: '2026-10-04T12:00:00.000Z' }))
+  assert.equal(
+    parseEvPayload({ ...base, expiresAt: 1_777_000_000_000 }),
+    null,
+    'expiresAt 只收字符串：手机上那颗倒计时读的是 Date.parse，喂数字会静默变 NaN',
+  )
+})
+
+test('ev.question_resolved：收回提问卡只认 requestId，by 可选但不许是别的词', () => {
+  assert.equal(parseEvPayload({ t: 'ev.question_resolved' }), null)
+  assert.ok(parseEvPayload({ t: 'ev.question_resolved', requestId: 'q1' }), '只给 requestId 就该成立')
+  assert.ok(parseEvPayload({ t: 'ev.question_resolved', requestId: 'q1', sessionId: 's', by: 'desktop' }))
+  assert.equal(
+    parseEvPayload({ t: 'ev.question_resolved', requestId: 'q1', by: 'answered' }),
+    null,
+    'by 是"谁收的场"，不是答案；放开取值手机那边就要维护一张语义表',
+  )
+})
+
 test('事件：result 的 cmdId 允许空串（host 兜底回执拿不到 cmdId 时就是这么发）', () => {
   assert.ok(parseEvPayload({ t: 'ev.result', cmdId: '', ok: false, message: '载荷处理失败' }))
   assert.ok(parseEvPayload({ t: 'ev.result', cmdId: 'c1', ok: true, data: { sessions: [] } }))

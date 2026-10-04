@@ -33,6 +33,7 @@ import {
   permissionRequest,
   permissionResolved,
   questionRequest,
+  questionResolved,
 } from '../../src/wire/outbound.js'
 
 const keysOf = (value: object): string[] => Object.keys(value).sort()
@@ -99,6 +100,11 @@ test('出站载荷都能被解析，且字段名与 schema 一致', () => {
       requestId: 'r1',
       questions: [{ id: 'q1', question: '选哪个环境？', options: [{ id: 'staging', label: '预发' }] }],
     }),
+    // 提问卡现在也带到期时刻：主机那边本来就 300 秒就判没答上，手机上看不见倒计时就是骗人。
+    questionRequest({ requestId: 'r2', questions: [{ id: 'q1', question: '要哪个？' }], expiresAt: 'x' }),
+    // 两端同时问提问这条也一样：输的那一侧要主动收。
+    questionResolved({ requestId: 'r1', sessionId: 'ses_1', by: 'desktop' }),
+    questionResolved({ requestId: 'r1' }),
     runState({ state: 'idle', detail: 'interrupted', sessionId: 'ses_1' }),
     model({ model: 'deepseek-chat', canSwitch: false, reason: '这一代内核只能读当前模型' }),
     model({

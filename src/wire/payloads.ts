@@ -137,6 +137,30 @@ export const evQuestionRequest = z.object({
   sessionId: nonEmpty.optional(),
   requestId: nonEmpty,
   questions: z.array(questionItem),
+  /**
+   * 这张提问卡什么时候作废（ISO 字符串）。
+   *
+   * 为什么审批有而提问没有过：主机侧的提问等待本来就带超时（`questionTimeoutMs`，默认 300s），
+   * 但手机上那张卡**没有任何倒计时**——用户看不见自己按的按钮什么时候失效，
+   * 而这违反伞仓 `docs/PRODUCT.md` §3 第 3 条「超时必须可见」。
+   * 与审批那条同一个形状：可选、ISO 字符串、由主机每次发问时现算。
+   */
+  expiresAt: z.string().optional(),
+})
+
+/**
+ * 「这张提问卡不用答了」——桌面那一位先答了，或者这次请求本身被撤回/超时。
+ *
+ * 与 `ev.permission_resolved` 同一条理由：提问现在也是**两端同时问、谁先答谁算**，
+ * 输的那一侧必须被明确收回，不能靠手机自己那张没有倒计时的卡一直挂着。
+ * 老版本的小程序收到不认识的 `t` 会静默忽略，所以这一帧可以先于小程序那半上线。
+ */
+export const evQuestionResolved = z.object({
+  t: z.literal('ev.question_resolved'),
+  requestId: nonEmpty,
+  sessionId: nonEmpty.optional(),
+  /** 谁收的场。手机只按"要不要收掉这张卡"读它，所以不做必填。 */
+  by: z.enum(['desktop', 'cancelled']).optional(),
 })
 
 export const evRunState = z.object({
@@ -246,6 +270,8 @@ export type EvPermissionRequest = z.infer<typeof evPermissionRequest>
 export type EvPermissionResolved = z.infer<typeof evPermissionResolved>
 /** evQuestionRequest 的推导类型。 */
 export type EvQuestionRequest = z.infer<typeof evQuestionRequest>
+/** evQuestionResolved 的推导类型。 */
+export type EvQuestionResolved = z.infer<typeof evQuestionResolved>
 /** evRunState 的推导类型。 */
 export type EvRunState = z.infer<typeof evRunState>
 /** evKeepAwakeState 的推导类型。 */
@@ -284,6 +310,7 @@ export const evPayload = z.discriminatedUnion('t', [
   evPermissionRequest,
   evPermissionResolved,
   evQuestionRequest,
+  evQuestionResolved,
   evRunState,
   evKeepAwakeState,
   evModel,
@@ -432,6 +459,7 @@ export const PAYLOAD_TYPES = {
   evPermissionRequest: 'ev.permission_request',
   evPermissionResolved: 'ev.permission_resolved',
   evQuestionRequest: 'ev.question_request',
+  evQuestionResolved: 'ev.question_resolved',
   evRunState: 'ev.run_state',
   evKeepAwakeState: 'ev.keep_awake_state',
   evModel: 'ev.model',
