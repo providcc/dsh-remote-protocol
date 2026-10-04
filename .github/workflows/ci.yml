@@ -28,7 +28,7 @@ jobs:
 
       # 工具链固定 22：pnpm 11.7 要求 Node ≥ 22.13（它 import `node:sqlite`）。
       # 这里原先直接用矩阵版本，于是 node 20 那条腿连 setup-node 的 pnpm 缓存步骤都过不去。
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: pnpm
@@ -48,11 +48,19 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # engines 写的是 >=20，那就得真在 20 上把测试跑一遍。跑测试只要 `node --test`，
-      # 不需要 pnpm 参与，所以这里可以把 node 切成矩阵版本。
-      - uses: actions/setup-node@v4
+      # engines 写的是 >=20，那就得真在 20 上把测试跑一遍。跑测试只要 `node --test`
+      # 打编译产物，不经 pnpm，所以这里可以把 node 切成矩阵版本。
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
 
+      # 用 find explicit 列文件，而不是把 glob 交给 node：`--test` 的位置参数语义在
+      # 版本之间变过——node 20 把它当字面路径（`dist/tests/**/*.test.js` 直接 "Could not find"），
+      # node 22 才当 glob。文件数还必须先断言非零，否则路径一改名就变成"0 个测试全绿"。
       - name: Run tests on node ${{ matrix.node }}
-        run: node --test "dist/tests/**/*.test.js"
+        run: |
+          set -e
+          n="$(find dist/tests -name '*.test.js' | wc -l)"
+          echo "测试文件数：$n"
+          [ "$n" -gt 0 ] || { echo "dist/tests 下没找到 *.test.js（产物路径或命名变了？）"; exit 1; }
+          find dist/tests -name '*.test.js' -print0 | xargs -0 node --test
