@@ -5,6 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [1.3.0] - 2026-10-04
+
+### 新增：`cmd.send_prompt` 可以带图片附件
+
+手机发消息时最多带 **4 张 jpeg**（`images: [{name, mediaType:'image/jpeg', data(<base64>), width?, height?}]`）。
+字段是**可选增补**：不带 `images` 的老手机照旧发得出去，带了的消息发到老主机那边，
+主机只读 `text`（zod strip 未知键）——所以这是向后兼容的一跳，不升协议版本，
+上线顺序也没有约束。
+
+两条纪律写进 schema 而不是文档：
+1. **只收 jpeg**。相册选完由 mp 的 `wx.compressImage` 统一输出，png 之类在协议层就挡下
+   ——放到应用层就会出现"主机存了一堆主机读不了的类型"。
+2. **上限 4 张**。中继 `DRC_MAX_MSG_BYTES` 是硬上限（server 仓 1.0.3 起默认 1MB），
+   超了整条帧被掐；4 张是"看清楚这几张"与"别把帧撑爆"的折中。
+
+为什么图片走 base64 而不是路径：图片在**手机上**，主机那头没有这个文件；
+而整条载荷是 JSON（之后还要 seal 成密文帧），二进制在 JSON 里只有 base64 一条路。
+体积的事因此全在 mp 侧的压缩参数上（压缩率见 mp 的 `IMAGE_QUALITY`）。
+
 ## [1.2.0] - 2026-10-04
 
 ### 新增：两条"收回卡片"的载荷与提问卡的到期时刻

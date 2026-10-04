@@ -321,12 +321,39 @@ export type EvPayload = z.infer<typeof evPayload>
 
 // ── 入站载荷（client → host）─────────────────────────────────────────
 
+/**
+ * 一条随消息带的图片附件（2026-10-04 加，可选）。
+ *
+ * 为什么是 base64 而不是路径：图片在**手机上**，主机那头没有这个文件；而整条载荷
+ * 是 JSON（之后还要 seal 成密文帧），二进制在 JSON 里只有 base64 一条路。
+ * 于是体积纪律全在 mp 侧：`wx.compressImage` 先压（质量 + 最长边），
+ * 中继 `DRC_MAX_MSG_BYTES` 是硬上限（默认 1MB，见 server 仓），超了整条帧被掐。
+ * **只收 jpeg**：相册选完压出来就是 jpeg，png 的先让 mp 转（ compressImage 统一输出）。
+ */
+export const imageAttachment = z.object({
+  /** 落盘用的文件名（mp 侧生成，形如 `img-<ms>-<n>.jpg`；主机侧还会再收敛一次字符集）。 */
+  name: nonEmpty,
+  mediaType: z.literal('image/jpeg'),
+  /** base64 字节，**不带** `data:` 前缀。 */
+  data: nonEmpty,
+  /** 压缩后的像素尺寸，主机写旁车元数据用（排错时对得上）。 */
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+})
+export type ImageAttachment = z.infer<typeof imageAttachment>
+
 export const cmdSendPrompt = z.object({
   t: z.literal('cmd.send_prompt'),
   cmdId: nonEmpty,
   /** DSH 会话 id，不是配对通道 id。 */
   sessionId: nonEmpty,
   text: z.string(),
+  /**
+   * 随消息的图片附件。**可选**：老版本手机不带这个字段，老主机看到也不认
+   * （zod 默认 strip 未知键，而 text 照旧）——所以这是向后兼容的增补，不升协议版本。
+   * 上限 4 张：再多对"看清楚这张图"没有帮助，只是把帧撑爆。
+   */
+  images: z.array(imageAttachment).max(4).optional(),
 })
 
 const answerItem = z.object({

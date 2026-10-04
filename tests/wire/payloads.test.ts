@@ -183,6 +183,27 @@ test('send_prompt 的 text 允许空串（"只带附件"这类将来态不该被
   assert.ok(cmdSendPrompt.safeParse({ t: 'cmd.send_prompt', cmdId: 'c', sessionId: 's', text: '' }).success)
 })
 
+test('send_prompt 的 images：可选、只认 jpeg、上限 4 张、data 非空', () => {
+  const base = { t: 'cmd.send_prompt', cmdId: 'c', sessionId: 's', text: '看这张' }
+  const one = { name: 'img-1.jpg', mediaType: 'image/jpeg', data: 'AAAA' }
+  // 不带 images：老版本手机照旧发得出去（这是增补，不是改语义）
+  assert.ok(cmdSendPrompt.safeParse(base).success)
+  assert.ok(cmdSendPrompt.safeParse({ ...base, images: [one] }).success)
+  assert.ok(cmdSendPrompt.safeParse({ ...base, images: Array.from({ length: 4 }, () => one) }).success)
+  // 超 4 张：帧会被撑爆（中继 maxMessageBytes 是硬上限），协议层就拒
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: Array.from({ length: 5 }, () => one) }).success)
+  // 只收 jpeg：相册选完由 mp 的 compressImage 统一输出，别的类型在协议层就挡下
+  for (const mediaType of ['image/png', 'image/webp', 'image/jpg', '', 'IMAGE/JPEG']) {
+    assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, mediaType }] }).success, mediaType)
+  }
+  // data 空串 = 一张空图，不行
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, data: '' }] }).success)
+  // 宽高可选；给了就必须是正整数（0 与小数都是坏数据）
+  assert.ok(cmdSendPrompt.safeParse({ ...base, images: [{ ...one, width: 1600, height: 1200 }] }).success)
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, width: 0 }] }).success)
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, height: 1.5 }] }).success)
+})
+
 test('事件：message_delta 必须有 messageId；done 是可选布尔；delta 允许空串', () => {
   assert.ok(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1', delta: 'hi' }))
   assert.ok(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1', delta: '', done: true }))
