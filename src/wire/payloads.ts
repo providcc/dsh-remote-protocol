@@ -103,6 +103,26 @@ export const evPermissionRequest = z.object({
   expiresAt: z.string().optional(),
 })
 
+/**
+ * 「这张审批卡不用答了」——桌面那一位先答了，或者这次请求本身被撤回。
+ *
+ * 为什么必须有：主机现在**同时**问桌面和手机（谁先答谁算，插件不许改变宿主自己的行为）。
+ * 手机先答时，桌面那张会留到这次工具调用的生命周期结束——那是宿主自己的 `signal` 在收尾，
+ * 插件碰不到，只能接受；但**反过来不能靠手机自己超时**：桌面上有人点了之后，
+ * 手机那张卡的倒计时还在走、按钮还能点，点下去是对着一个已经关闭的请求做写操作。
+ * 所以输的那一侧必须被明确收回。
+ *
+ * 老版本的小程序收到不认识的 `t` 会**静默忽略**（分发是一串 `if (p.t === …)`），
+ * 所以这一帧可以先于小程序那半上线，不会把谁钉死。
+ */
+export const evPermissionResolved = z.object({
+  t: z.literal('ev.permission_resolved'),
+  requestId: nonEmpty,
+  sessionId: nonEmpty.optional(),
+  /** 谁收的场。手机只按"要不要收掉这张卡"读它，所以不做必填。 */
+  by: z.enum(['desktop', 'cancelled']).optional(),
+})
+
 const questionItem = z.object({
   id: nonEmpty,
   question: nonEmpty,
@@ -117,6 +137,30 @@ export const evQuestionRequest = z.object({
   sessionId: nonEmpty.optional(),
   requestId: nonEmpty,
   questions: z.array(questionItem),
+  /**
+   * 这张提问卡什么时候作废（ISO 字符串）。
+   *
+   * 为什么审批有而提问没有过：主机侧的提问等待本来就带超时（`questionTimeoutMs`，默认 300s），
+   * 但手机上那张卡**没有任何倒计时**——用户看不见自己按的按钮什么时候失效，
+   * 而这违反伞仓 `docs/PRODUCT.md` §3 第 3 条「超时必须可见」。
+   * 与审批那条同一个形状：可选、ISO 字符串、由主机每次发问时现算。
+   */
+  expiresAt: z.string().optional(),
+})
+
+/**
+ * 「这张提问卡不用答了」——桌面那一位先答了，或者这次请求本身被撤回/超时。
+ *
+ * 与 `ev.permission_resolved` 同一条理由：提问现在也是**两端同时问、谁先答谁算**，
+ * 输的那一侧必须被明确收回，不能靠手机自己那张没有倒计时的卡一直挂着。
+ * 老版本的小程序收到不认识的 `t` 会静默忽略，所以这一帧可以先于小程序那半上线。
+ */
+export const evQuestionResolved = z.object({
+  t: z.literal('ev.question_resolved'),
+  requestId: nonEmpty,
+  sessionId: nonEmpty.optional(),
+  /** 谁收的场。手机只按"要不要收掉这张卡"读它，所以不做必填。 */
+  by: z.enum(['desktop', 'cancelled']).optional(),
 })
 
 export const evRunState = z.object({
@@ -127,12 +171,68 @@ export const evRunState = z.object({
   detail: z.string().optional(),
 })
 
+/** 一条待办。与内核 `todo/write` 的 `TodoItem` 一一对应——整条原样转发，小程序不猜。 */
+const todoItem = z.object({
+  /** 待办正文。内核侧不限长，协议侧截到 200 字（面板高度有限，超长的部分看不见）。 */
+  content: z.string(),
+  status: z.enum(['pending', 'in_progress', 'completed']),
+})
+
+/** 待办清单。 */
+export type TodoItem = z.infer<typeof todoItem>
+
+/**
+ * 会话当前的待办清单（**全量快照**，与内核 `todo/write` 同语义）。
+ *
+ * 为什么放在顶上一颗常驻条里、默认收起：它是"这一轮在干什么"的索引，不是正文——
+ * 混进消息流会和堆栈帧互相踩（用户 2026-10-05 点的就是做在顶部、别和排队消息打架）。
+ */
+export const evTodo = z.object({
+  t: z.literal('ev.todo'),
+  sessionId: nonEmpty.optional(),
+  todos: z.array(todoItem),
+})
+
 export const evKeepAwakeState = z.object({
   t: z.literal('ev.keep_awake_state'),
   enabled: z.boolean(),
   active: z.boolean(),
   platform: nonEmpty,
   backend: nonEmpty,
+  reason: z.string().optional(),
+})
+
+/** 一个可切换的模型候选。`value` 会被手机逐字回传，所以它必须与主机侧的键同名同值。 */
+export const modelOption = z.object({
+  /** 机器名（回传用），例如 `deepseek-chat`。 */
+  value: nonEmpty,
+  /** 给人看的名字；缺省时小程序自己截断 `value`。 */
+  label: z.string().optional(),
+  provider: z.string().optional(),
+})
+export type ModelOption = z.infer<typeof modelOption>
+
+/**
+ * 当前模型。
+ *
+ * 为什么要显式带 `canSwitch`，而不是让手机看`options` 有没有值来推断：
+ * 「内核不能换」和「内核能换但这里没列全」在手机上必须表现不同 ——
+ * 前者下拉要置灰并说明原因，后者是可点的列表。一个字段省掉，代价是
+ * 「点了没反应」这个最难排查的现象。
+ *
+ * **这一代内核只能读**（`agentDefaultModel` 上只有 `currentSelection`），
+ * 所以线上 `canSwitch` 是 `false`、`options` 为空。字段先立好，
+ * 内核补上写能力后只改宿主那一侧。
+ */
+export const evModel = z.object({
+  t: z.literal('ev.model'),
+  provider: nonEmpty.optional(),
+  model: nonEmpty,
+  /** 主机能不能换。false 时小程序**不许**渲染成可点的下拉。 */
+  canSwitch: z.boolean(),
+  /** 候选清单；`canSwitch` 为 true 时至少一项。 */
+  options: z.array(modelOption).optional(),
+  /** 不能切时给手机一句人话，直接显示，不要让小程序自己编措辞。 */
   reason: z.string().optional(),
 })
 
@@ -188,12 +288,20 @@ export type EvMessageDelta = z.infer<typeof evMessageDelta>
 export type EvToolEvent = z.infer<typeof evToolEvent>
 /** evPermissionRequest 的推导类型。 */
 export type EvPermissionRequest = z.infer<typeof evPermissionRequest>
+/** evPermissionResolved 的推导类型。 */
+export type EvPermissionResolved = z.infer<typeof evPermissionResolved>
 /** evQuestionRequest 的推导类型。 */
 export type EvQuestionRequest = z.infer<typeof evQuestionRequest>
+/** evQuestionResolved 的推导类型。 */
+export type EvQuestionResolved = z.infer<typeof evQuestionResolved>
 /** evRunState 的推导类型。 */
 export type EvRunState = z.infer<typeof evRunState>
+/** evTodo 的推导类型。 */
+export type EvTodo = z.infer<typeof evTodo>
 /** evKeepAwakeState 的推导类型。 */
 export type EvKeepAwakeState = z.infer<typeof evKeepAwakeState>
+/** evModel 的推导类型。 */
+export type EvModel = z.infer<typeof evModel>
 /** evResult 的推导类型。 */
 export type EvResult = z.infer<typeof evResult>
 /** evSessionHistory 的推导类型。 */
@@ -224,9 +332,13 @@ export const evPayload = z.discriminatedUnion('t', [
   evMessageDelta,
   evToolEvent,
   evPermissionRequest,
+  evPermissionResolved,
   evQuestionRequest,
+  evQuestionResolved,
   evRunState,
+  evTodo,
   evKeepAwakeState,
+  evModel,
   evResult,
   evSessionHistory,
 ])
@@ -234,12 +346,39 @@ export type EvPayload = z.infer<typeof evPayload>
 
 // ── 入站载荷（client → host）─────────────────────────────────────────
 
+/**
+ * 一条随消息带的图片附件（2026-10-04 加，可选）。
+ *
+ * 为什么是 base64 而不是路径：图片在**手机上**，主机那头没有这个文件；而整条载荷
+ * 是 JSON（之后还要 seal 成密文帧），二进制在 JSON 里只有 base64 一条路。
+ * 于是体积纪律全在 mp 侧：`wx.compressImage` 先压（质量 + 最长边），
+ * 中继 `DRC_MAX_MSG_BYTES` 是硬上限（默认 1MB，见 server 仓），超了整条帧被掐。
+ * **只收 jpeg**：相册选完压出来就是 jpeg，png 的先让 mp 转（ compressImage 统一输出）。
+ */
+export const imageAttachment = z.object({
+  /** 落盘用的文件名（mp 侧生成，形如 `img-<ms>-<n>.jpg`；主机侧还会再收敛一次字符集）。 */
+  name: nonEmpty,
+  mediaType: z.literal('image/jpeg'),
+  /** base64 字节，**不带** `data:` 前缀。 */
+  data: nonEmpty,
+  /** 压缩后的像素尺寸，主机写旁车元数据用（排错时对得上）。 */
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+})
+export type ImageAttachment = z.infer<typeof imageAttachment>
+
 export const cmdSendPrompt = z.object({
   t: z.literal('cmd.send_prompt'),
   cmdId: nonEmpty,
   /** DSH 会话 id，不是配对通道 id。 */
   sessionId: nonEmpty,
   text: z.string(),
+  /**
+   * 随消息的图片附件。**可选**：老版本手机不带这个字段，老主机看到也不认
+   * （zod 默认 strip 未知键，而 text 照旧）——所以这是向后兼容的增补，不升协议版本。
+   * 上限 4 张：再多对"看清楚这张图"没有帮助，只是把帧撑爆。
+   */
+  images: z.array(imageAttachment).max(4).optional(),
 })
 
 const answerItem = z.object({
@@ -370,9 +509,13 @@ export const PAYLOAD_TYPES = {
   evMessageDelta: 'ev.message_delta',
   evToolEvent: 'ev.tool_event',
   evPermissionRequest: 'ev.permission_request',
+  evPermissionResolved: 'ev.permission_resolved',
   evQuestionRequest: 'ev.question_request',
+  evQuestionResolved: 'ev.question_resolved',
   evRunState: 'ev.run_state',
+  evTodo: 'ev.todo',
   evKeepAwakeState: 'ev.keep_awake_state',
+  evModel: 'ev.model',
   evResult: 'ev.result',
   evSessionHistory: 'ev.session_history',
 } as const
@@ -387,8 +530,7 @@ export const PAYLOAD_TYPES = {
 export function isoOrUndefined(value: unknown): string | undefined {
   if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return value
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const iso = new Date(value).toISOString()
-    return Number.isNaN(Date.parse(iso)) ? undefined : iso
+    return new Date(value).toISOString()
   }
   return undefined
 }

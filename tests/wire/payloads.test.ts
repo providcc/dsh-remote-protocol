@@ -183,6 +183,27 @@ test('send_prompt 的 text 允许空串（"只带附件"这类将来态不该被
   assert.ok(cmdSendPrompt.safeParse({ t: 'cmd.send_prompt', cmdId: 'c', sessionId: 's', text: '' }).success)
 })
 
+test('send_prompt 的 images：可选、只认 jpeg、上限 4 张、data 非空', () => {
+  const base = { t: 'cmd.send_prompt', cmdId: 'c', sessionId: 's', text: '看这张' }
+  const one = { name: 'img-1.jpg', mediaType: 'image/jpeg', data: 'AAAA' }
+  // 不带 images：老版本手机照旧发得出去（这是增补，不是改语义）
+  assert.ok(cmdSendPrompt.safeParse(base).success)
+  assert.ok(cmdSendPrompt.safeParse({ ...base, images: [one] }).success)
+  assert.ok(cmdSendPrompt.safeParse({ ...base, images: Array.from({ length: 4 }, () => one) }).success)
+  // 超 4 张：帧会被撑爆（中继 maxMessageBytes 是硬上限），协议层就拒
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: Array.from({ length: 5 }, () => one) }).success)
+  // 只收 jpeg：相册选完由 mp 的 compressImage 统一输出，别的类型在协议层就挡下
+  for (const mediaType of ['image/png', 'image/webp', 'image/jpg', '', 'IMAGE/JPEG']) {
+    assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, mediaType }] }).success, mediaType)
+  }
+  // data 空串 = 一张空图，不行
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, data: '' }] }).success)
+  // 宽高可选；给了就必须是正整数（0 与小数都是坏数据）
+  assert.ok(cmdSendPrompt.safeParse({ ...base, images: [{ ...one, width: 1600, height: 1200 }] }).success)
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, width: 0 }] }).success)
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, height: 1.5 }] }).success)
+})
+
 test('事件：message_delta 必须有 messageId；done 是可选布尔；delta 允许空串', () => {
   assert.ok(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1', delta: 'hi' }))
   assert.ok(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1', delta: '', done: true }))
@@ -247,6 +268,21 @@ test('事件：keep_awake_state 的四个必填字段一个都不能少（手机
   assert.equal('sessionId' in stripped, false, 'sessionId 会被剥掉：这个 payload 按契约不带会话归属（F11）')
 })
 
+test('ev.permission_resolved：收回卡片只认 requestId，by 可选但不许是别的词', () => {
+  // 没有 requestId 就收不了任何一张卡——手机是靠它对上号的，所以这条必须红。
+  assert.equal(parseEvPayload({ t: 'ev.permission_resolved' }), null)
+  assert.ok(
+    parseEvPayload({ t: 'ev.permission_resolved', requestId: 'r1' }),
+    '只给 requestId 就该成立（老宿主不知道 by）',
+  )
+  assert.ok(parseEvPayload({ t: 'ev.permission_resolved', requestId: 'r1', sessionId: 's', by: 'desktop' }))
+  assert.equal(
+    parseEvPayload({ t: 'ev.permission_resolved', requestId: 'r1', by: 'approved' }),
+    null,
+    'by 是"谁收的场"，不是审批结果；放开取值会让手机那边要维护一张语义表',
+  )
+})
+
 test('事件：permission/question 的 requestId 与 questions[].id 是回传映射的锚', () => {
   assert.equal(parseEvPayload({ t: 'ev.permission_request', action: '执行 bash' }), null)
   assert.ok(
@@ -280,6 +316,28 @@ test('事件：permission/question 的 requestId 与 questions[].id 是回传映
     }),
   )
   assert.equal(parseEvPayload({ t: 'ev.question_request', requestId: 'q', questions: [{}] }), null)
+})
+
+test('ev.question_request 的 expiresAt 是可选的：老宿主不发，手机就不许显示"undefined 秒"', () => {
+  const base = { t: 'ev.question_request', requestId: 'q', questions: [{ id: 'q1', question: '要哪个？' }] }
+  assert.ok(parseEvPayload(base), '不带 expiresAt 必须仍然成立（这一帧刚补这个字段，宿主两侧不会同时升级）')
+  assert.ok(parseEvPayload({ ...base, expiresAt: '2026-10-04T12:00:00.000Z' }))
+  assert.equal(
+    parseEvPayload({ ...base, expiresAt: 1_777_000_000_000 }),
+    null,
+    'expiresAt 只收字符串：手机上那颗倒计时读的是 Date.parse，喂数字会静默变 NaN',
+  )
+})
+
+test('ev.question_resolved：收回提问卡只认 requestId，by 可选但不许是别的词', () => {
+  assert.equal(parseEvPayload({ t: 'ev.question_resolved' }), null)
+  assert.ok(parseEvPayload({ t: 'ev.question_resolved', requestId: 'q1' }), '只给 requestId 就该成立')
+  assert.ok(parseEvPayload({ t: 'ev.question_resolved', requestId: 'q1', sessionId: 's', by: 'desktop' }))
+  assert.equal(
+    parseEvPayload({ t: 'ev.question_resolved', requestId: 'q1', by: 'answered' }),
+    null,
+    'by 是"谁收的场"，不是答案；放开取值手机那边就要维护一张语义表',
+  )
 })
 
 test('事件：result 的 cmdId 允许空串（host 兜底回执拿不到 cmdId 时就是这么发）', () => {

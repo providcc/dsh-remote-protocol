@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-wire",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "description": "Wire protocol for DSH Remote Control: sealed-record crypto, KDF, pairing URI, control frames, payload catalog, keep-awake command builder. Pure functions — no I/O, no timers, no platform symbols.",
   "type": "module",
   "license": "MIT",
@@ -88,9 +88,9 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
+    "@types/node": "^26.6.3",
     "prettier": "^3.3.3",
-    "typescript": "^5.6.3"
+    "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@11.7.0"
 }

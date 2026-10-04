@@ -13,14 +13,9 @@ import {
   encBatchFrame,
   errorFrame,
   helloFrame,
-  isEncFrame,
-  makeEncBatchFrame,
-  makeEncFrame,
-  makeErrorFrame,
   pairBeginFrame,
   pairReadyFrame,
   parseEndpointFrame,
-  parseEndpointFrameText,
   parseRelayFrame,
   parseRelayFrameText,
   peerJoinedFrame,
@@ -100,7 +95,11 @@ test('seq 只当元数据：非负整数可以任意起点，负数与小拒', (
 
 test('enc-batch 的通道 id 只在外层，items 至少一项且每项自带密文（F12）', () => {
   assert.ok(
-    parseEndpointFrame(makeEncBatchFrame('c_a1b2c3d4e5f6', [{ ciphertext: CIPHER }, { ciphertext: CIPHER, seq: 2 }])),
+    parseEndpointFrame({
+      t: 'enc-batch',
+      sessionId: 'c_a1b2c3d4e5f6',
+      items: [{ ciphertext: CIPHER }, { ciphertext: CIPHER, seq: 2 }],
+    }),
   )
   assert.equal(encBatchFrame.safeParse({ t: 'enc-batch', sessionId: 'c_x', items: [] }).success, false)
   assert.equal(encBatchFrame.safeParse({ t: 'enc-batch', sessionId: 'c_x', items: [{ nope: 1 }] }).success, false)
@@ -116,7 +115,7 @@ test('中继来帧：paired 必须带 sessionId，peer-joined 可以带 pairingT
   assert.equal(parseRelayFrame({ t: 'paired', hostId: 'h1' }), null)
   assert.ok(parseRelayFrame({ t: 'peer-joined', sessionId: 'c_1', clientId: 'c1', pairingToken: '123456' }))
   assert.equal(parseRelayFrame({ t: 'peer-joined', sessionId: 'c_1', pairingToken: '12' }), null)
-  assert.ok(parseRelayFrame(makeErrorFrame('unknown_session', '会话不存在')))
+  assert.ok(parseRelayFrame({ t: 'error', code: 'unknown_session', message: '会话不存在' }))
   assert.equal(errorFrame.safeParse({ t: 'error', code: 'wat' }).success, false)
   assert.equal(errorFrame.safeParse({ t: 'error' }).success, false)
   assert.equal(peerJoinedFrame.safeParse({ t: 'peer-joined', sessionId: 'c_1', clientId: '' }).success, false)
@@ -135,7 +134,6 @@ test('pair-fail 的 reason 只能是小程序有中文映射的那四个（F6）
 test('文本解析：非法 JSON、数组、标量、缺 t 全部返回 null 而不抛', () => {
   for (const raw of ['', 'null', '[]', '42', '"hi"', '{', '{"t":}', '{"nope":1}']) {
     assert.equal(parseRelayFrameText(raw), null, raw)
-    assert.equal(parseEndpointFrameText(raw), null, raw)
   }
 })
 
@@ -144,17 +142,10 @@ test('未知帧名不会被静默接受（中继据此回 unknown_frame）', () 
   assert.equal(parseRelayFrame({ t: 'keepalive' }), null)
 })
 
-test('构造器产出的形状立即可被对侧解析（自证往返）', () => {
-  const enc = makeEncFrame('c_a1b2c3d4e5f6', CIPHER, { seq: 3, clientId: 'inst-1' })
+test('一条数据面帧的形状立即可被两侧解析（自证往返）', () => {
+  const enc = { t: 'enc', sessionId: 'c_a1b2c3d4e5f6', ciphertext: CIPHER, seq: 3, clientId: 'inst-1' }
   assert.deepEqual(parseRelayFrame(enc), enc)
   assert.deepEqual(parseEndpointFrame(enc), enc)
-  assert.deepEqual(makeErrorFrame('bad_frame'), { t: 'error', code: 'bad_frame' })
-})
-
-test('isEncFrame 只认两条数据面帧（转发热路径的分诊判据）', () => {
-  assert.equal(isEncFrame({ t: 'enc' }), true)
-  assert.equal(isEncFrame({ t: 'enc-batch' }), true)
-  for (const t of ['hello', 'paired', 'error', 'pong', 'enc ']) assert.equal(isEncFrame({ t }), false)
 })
 
 test('resync：主机声明它仍持有密钥的会话（复核 R1 的协议入口）', () => {
