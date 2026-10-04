@@ -18,20 +18,23 @@ import {
   keepAwakeState,
   makeError,
   messageDelta,
+  model,
   paired,
   pairFail,
   pairReady,
   peerJoinedForHost,
-  peerJoinedNotice,
   peerLeft,
   pong,
   result,
   runState,
   sessionChanged,
+  todoList,
   sessionHistory,
   toolEvent,
   permissionRequest,
+  permissionResolved,
   questionRequest,
+  questionResolved,
 } from '../../src/wire/outbound.js'
 
 const keysOf = (value: object): string[] => Object.keys(value).sort()
@@ -44,7 +47,6 @@ test('每条出站控制帧都能被对侧的 schema 解出来（自证往返）
     paired('c_a1b2c3d4e5f6', 'h1'),
     pairFail('already_used'),
     peerJoinedForHost('c_a1b2c3d4e5f6', 'inst-1', '123456'),
-    peerJoinedNotice('c_a1b2c3d4e5f6', 'h1'),
     peerLeft('c_a1b2c3d4e5f6', 'h1'),
     makeError('unknown_session'),
     makeError('bad_frame', 'binary frames are not supported'),
@@ -68,9 +70,8 @@ test('F4：paired 必带 sessionId；pair-ready 必带正整数 ttlMs', () => {
   assert.deepEqual(keysOf(pairReady('123456', 90_000)), ['pairingToken', 't', 'ttlMs'])
 })
 
-test('旧事故：给主机的 peer-joined 带 pairingToken，给客户端的那条不带', () => {
+test('旧事故：给主机的 peer-joined 带 pairingToken（客户端那一条由中继自己写，不带 token）', () => {
   assert.deepEqual(keysOf(peerJoinedForHost('c_x', 'i', '123456')), ['clientId', 'pairingToken', 'sessionId', 't'])
-  assert.deepEqual(keysOf(peerJoinedNotice('c_x', 'h')), ['clientId', 'sessionId', 't'])
 })
 
 test('F11：两个"无会话归属"的载荷里不存在 sessionId 这条路', () => {
@@ -93,17 +94,61 @@ test('出站载荷都能被解析，且字段名与 schema 一致', () => {
     messageDelta({ messageId: 'm2', delta: '', done: true }),
     toolEvent({ callId: 'c1', phase: 'started', tool: 'bash' }),
     permissionRequest({ requestId: 'r1', action: '执行 bash', options: [{ id: 'approve', label: '允许' }] }),
+    // 桌面与手机同时被问之后，"收回那张卡"成了出站面上的一等公民，所以它也得走同一条自证往返。
+    permissionResolved({ requestId: 'r1', sessionId: 'ses_1', by: 'desktop' }),
+    permissionResolved({ requestId: 'r1' }),
     questionRequest({
       requestId: 'r1',
       questions: [{ id: 'q1', question: '选哪个环境？', options: [{ id: 'staging', label: '预发' }] }],
     }),
+    // 提问卡现在也带到期时刻：主机那边本来就 300 秒就判没答上，手机上看不见倒计时就是骗人。
+    questionRequest({ requestId: 'r2', questions: [{ id: 'q1', question: '要哪个？' }], expiresAt: 'x' }),
+    // 两端同时问提问这条也一样：输的那一侧要主动收。
+    questionResolved({ requestId: 'r1', sessionId: 'ses_1', by: 'desktop' }),
+    questionResolved({ requestId: 'r1' }),
     runState({ state: 'idle', detail: 'interrupted', sessionId: 'ses_1' }),
+    // 待办清单：全量快照，空数组也是合法载荷（内核清空清单时手机跟着清）。
+    todoList({
+      todos: [
+        { content: '复现问题', status: 'completed' },
+        { content: '改完跑全链路', status: 'in_progress' },
+      ],
+      sessionId: 'ses_1',
+    }),
+    todoList({ todos: [] }),
+    model({ model: 'deepseek-chat', canSwitch: false, reason: '这一代内核只能读当前模型' }),
+    model({
+      model: 'deepseek-chat',
+      canSwitch: true,
+      provider: 'deepseek',
+      options: [{ value: 'deepseek-chat', label: 'DeepSeek Chat' }],
+    }),
     result('c1', true, { data: { sessions: [] } }),
     result('', false, { message: '载荷处理失败' }),
   ]
   for (const payload of payloads) {
     assert.notEqual(parseEvPayload(payload), null, `${payload.t} 不合法`)
   }
+})
+
+test('model：canSwitch=false 时不下发候选（空数组会让两种"不能切"在手机上一回事）', () => {
+  const readOnly = model({
+    model: 'deepseek-chat',
+    canSwitch: false,
+    options: [{ value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' }],
+    reason: '这一代内核只能读当前模型',
+  })
+  assert.deepEqual(keysOf(readOnly), ['canSwitch', 'model', 'reason', 't'], '候选被构造器吃掉了')
+  assert.notEqual(parseEvPayload(readOnly), null)
+
+  // 空清单同理：canSwitch=true 却没有候选，手机会渲染出一个点的下拉。
+  const empty = model({ model: 'deepseek-chat', canSwitch: true, options: [] })
+  assert.equal('options' in empty, false)
+})
+
+test('model：sessionId 一个都不许带（模型是全局的，不属于任何会话）', () => {
+  const m = model({ model: 'deepseek-chat', canSwitch: false, provider: 'deepseek' })
+  assert.equal('sessionId' in m, false)
 })
 
 test('makeError：message 缺席时不留空键（否则对侧会读到 undefined 文案）', () => {

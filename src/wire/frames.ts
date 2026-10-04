@@ -72,7 +72,6 @@ export const helloFrame = z.object({
 export const pairBeginFrame = z.object({
   t: z.literal('pair-begin'),
   pairingToken,
-  hostLabel: z.string().max(128).optional(),
 })
 
 /** 客户端认领配对码。小程序从不提交 PSK。 */
@@ -277,37 +276,4 @@ export function parseRelayFrameText(raw: string): RelayFrame | null {
   } catch {
     return null
   }
-}
-
-/** JSON 文本 → 对象 → 端点来帧。 */
-export function parseEndpointFrameText(raw: string): EndpointFrame | null {
-  try {
-    return parseEndpointFrame(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-export function makeEncFrame(
-  sessionId: string,
-  ciphertext: string,
-  extra: { seq?: number; clientId?: string } = {},
-): z.infer<typeof encFrame> {
-  return { t: 'enc', sessionId, ciphertext, ...extra }
-}
-
-export function makeEncBatchFrame(
-  sessionId: string,
-  items: Array<{ ciphertext: string; seq?: number }>,
-): z.infer<typeof encBatchFrame> {
-  return { t: 'enc-batch', sessionId, items }
-}
-
-export function makeErrorFrame(code: ErrorCode, message?: string): z.infer<typeof errorFrame> {
-  return { t: 'error', code, ...(message ? { message } : {}) }
-}
-
-/** 是否一条数据面帧（中继的转发路径要绕开完整 schema 校验的热路径判断）。 */
-export function isEncFrame(frame: { t: string }): boolean {
-  return frame.t === 'enc' || frame.t === 'enc-batch'
 }

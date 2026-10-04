@@ -32,6 +32,3 @@ export * from './wire/payloads.js'
 export * from './wire/outbound.js'
 export * from './platform/sleep.js'
 export * from './identity/ids.js'
-
-/** 中继默认监听端口（`DRC_PORT` 的缺省值）。 */
-export const DEFAULT_RELAY_PORT = 8787
