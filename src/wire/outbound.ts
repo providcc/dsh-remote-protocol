@@ -20,15 +20,21 @@ import {
   type ChoiceOption,
   type EvKeepAwakeState,
   type EvMessageDelta,
+  type EvModel,
   type EvPayload,
   type EvPermissionRequest,
+  type EvPermissionResolved,
   type EvQuestionRequest,
+  type EvQuestionResolved,
   type EvResult,
   type EvRunState,
   type EvSessionChanged,
+  type EvTodo,
+  type TodoItem,
   type EvSessionHistory,
   type EvToolEvent,
   type HistoryItem,
+  type ModelOption,
   type QuestionItem,
   type SessionSummary,
   PAYLOAD_TYPES,
@@ -58,19 +64,13 @@ export function paired(sessionId: string, hostId: string): RelayOutbound {
   return { t: 'paired', sessionId, hostId }
 }
 
-export function pairFail(
-  reason: 'invalid_or_expired' | 'already_used' | 'host_offline' | 'bad_token' | 'rate_limited',
-): RelayOutbound {
+export function pairFail(reason: 'invalid_or_expired' | 'already_used' | 'host_offline' | 'bad_token'): RelayOutbound {
   return { t: 'pair-fail', reason }
 }
 
 /** 发给主机的加入通知必须带 pairingToken（主机按它取 PSK）；发给客户端的不带。 */
 export function peerJoinedForHost(sessionId: string, clientId: string, pairingToken: string): RelayOutbound {
   return { t: 'peer-joined', sessionId, clientId, pairingToken }
-}
-
-export function peerJoinedNotice(sessionId: string, hostId: string): RelayOutbound {
-  return { t: 'peer-joined', sessionId, clientId: hostId }
 }
 
 /**
@@ -139,16 +139,52 @@ export function permissionRequest(args: {
   return { t: PAYLOAD_TYPES.evPermissionRequest, ...args }
 }
 
+/**
+ * 收回一张已经不必回答的审批卡（见 `evPermissionResolved` 的注释：桌面与手机同时被问，
+ * 谁先答谁算，**输的那一侧要主动收**，不许让它对着一个已关闭的请求继续倒计时、继续可点）。
+ */
+export function permissionResolved(args: {
+  requestId: string
+  sessionId?: string
+  by?: 'desktop' | 'cancelled'
+}): EvPermissionResolved {
+  return { t: PAYLOAD_TYPES.evPermissionResolved, ...args }
+}
+
 export function questionRequest(args: {
   requestId: string
   questions: QuestionItem[]
+  expiresAt?: string
   sessionId?: string
 }): EvQuestionRequest {
   return { t: PAYLOAD_TYPES.evQuestionRequest, ...args }
 }
 
+/**
+ * 收回一张已经不必回答的提问卡（与 `permissionResolved` 同一条理由：两端同时问、
+ * 谁先答谁算，输的那一侧要主动收）。
+ *
+ * 提问这张卡**本来没有任何倒计时**（`ev.question_request` 今天才补上 `expiresAt`），
+ * 所以对它来说这一帧不是"提前收卡"，而是唯一一条能让它消失的路径之一。
+ */
+export function questionResolved(args: {
+  requestId: string
+  sessionId?: string
+  by?: 'desktop' | 'cancelled'
+}): EvQuestionResolved {
+  return { t: PAYLOAD_TYPES.evQuestionResolved, ...args }
+}
+
 export function runState(args: { state: 'running' | 'idle'; detail?: string; sessionId?: string }): EvRunState {
   return { t: PAYLOAD_TYPES.evRunState, ...args }
+}
+
+/**
+ * 待办清单（全量快照）。内核每次 `todo/write` 都给整份，所以这里也只发整份——
+ * 增量（增删改某一条）在协议里没有形状，手机也不需要理解"改了哪条"。
+ */
+export function todoList(args: { todos: TodoItem[]; sessionId?: string }): EvTodo {
+  return { t: PAYLOAD_TYPES.evTodo, ...args }
 }
 
 /**
@@ -163,6 +199,28 @@ export function keepAwakeState(args: {
   reason?: string
 }): EvKeepAwakeState {
   return { t: PAYLOAD_TYPES.evKeepAwakeState, ...args }
+}
+
+/**
+ * 当前模型。
+ *
+ * **`canSwitch` 必须由生产侧显式给出**，不许让手机从 `options` 有没有值去推断：
+ * 「内核不能换」与「能换但清单为空」在手机上必须表现不同（置灰 vs 可点），
+ * 推断出来的判断在"清单刚好为空"时会静默错成不可切。
+ */
+export function model(args: {
+  model: string
+  canSwitch: boolean
+  provider?: string
+  options?: ModelOption[]
+  reason?: string
+}): EvModel {
+  const payload: EvModel = { t: PAYLOAD_TYPES.evModel, model: args.model, canSwitch: args.canSwitch }
+  if (args.provider !== undefined) payload.provider = args.provider
+  // 不可切时**不下发**候选：空数组会让"有候选但都不可选"和"没有候选"在手机上一回事。
+  if (args.canSwitch && args.options?.length) payload.options = args.options
+  if (args.reason !== undefined) payload.reason = args.reason
+  return payload
 }
 
 export type EvResultExtras = { message?: string; data?: Record<string, unknown> }
@@ -202,5 +260,3 @@ export function sessionHistory(args: {
     ...(nextBeforeSeq === undefined ? {} : { nextBeforeSeq }),
   }
 }
-
-export type OutboundPayload = EvPayload

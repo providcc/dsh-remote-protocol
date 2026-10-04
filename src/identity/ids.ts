@@ -24,8 +24,3 @@ export function newHostId(): string {
 export function newCmdId(): string {
   return randomUUID()
 }
-
-/** 是否像一个配对通道 id（用于入站帧的粗筛，不做安全判断）。 */
-export function looksLikeConversationId(value: string): boolean {
-  return value.startsWith(CONVERSATION_ID_PREFIX) && /^[0-9a-f]{12}$/.test(value.slice(CONVERSATION_ID_PREFIX.length))
-}
