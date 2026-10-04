@@ -28,6 +28,7 @@ import {
   result,
   runState,
   sessionChanged,
+  todoList,
   sessionHistory,
   toolEvent,
   permissionRequest,
@@ -106,6 +107,15 @@ test('出站载荷都能被解析，且字段名与 schema 一致', () => {
     questionResolved({ requestId: 'r1', sessionId: 'ses_1', by: 'desktop' }),
     questionResolved({ requestId: 'r1' }),
     runState({ state: 'idle', detail: 'interrupted', sessionId: 'ses_1' }),
+    // 待办清单：全量快照，空数组也是合法载荷（内核清空清单时手机跟着清）。
+    todoList({
+      todos: [
+        { content: '复现问题', status: 'completed' },
+        { content: '改完跑全链路', status: 'in_progress' },
+      ],
+      sessionId: 'ses_1',
+    }),
+    todoList({ todos: [] }),
     model({ model: 'deepseek-chat', canSwitch: false, reason: '这一代内核只能读当前模型' }),
     model({
       model: 'deepseek-chat',

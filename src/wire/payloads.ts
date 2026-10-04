@@ -171,6 +171,28 @@ export const evRunState = z.object({
   detail: z.string().optional(),
 })
 
+/** 一条待办。与内核 `todo/write` 的 `TodoItem` 一一对应——整条原样转发，小程序不猜。 */
+const todoItem = z.object({
+  /** 待办正文。内核侧不限长，协议侧截到 200 字（面板高度有限，超长的部分看不见）。 */
+  content: z.string(),
+  status: z.enum(['pending', 'in_progress', 'completed']),
+})
+
+/** 待办清单。 */
+export type TodoItem = z.infer<typeof todoItem>
+
+/**
+ * 会话当前的待办清单（**全量快照**，与内核 `todo/write` 同语义）。
+ *
+ * 为什么放在顶上一颗常驻条里、默认收起：它是"这一轮在干什么"的索引，不是正文——
+ * 混进消息流会和堆栈帧互相踩（用户 2026-10-05 点的就是做在顶部、别和排队消息打架）。
+ */
+export const evTodo = z.object({
+  t: z.literal('ev.todo'),
+  sessionId: nonEmpty.optional(),
+  todos: z.array(todoItem),
+})
+
 export const evKeepAwakeState = z.object({
   t: z.literal('ev.keep_awake_state'),
   enabled: z.boolean(),
@@ -274,6 +296,8 @@ export type EvQuestionRequest = z.infer<typeof evQuestionRequest>
 export type EvQuestionResolved = z.infer<typeof evQuestionResolved>
 /** evRunState 的推导类型。 */
 export type EvRunState = z.infer<typeof evRunState>
+/** evTodo 的推导类型。 */
+export type EvTodo = z.infer<typeof evTodo>
 /** evKeepAwakeState 的推导类型。 */
 export type EvKeepAwakeState = z.infer<typeof evKeepAwakeState>
 /** evModel 的推导类型。 */
@@ -312,6 +336,7 @@ export const evPayload = z.discriminatedUnion('t', [
   evQuestionRequest,
   evQuestionResolved,
   evRunState,
+  evTodo,
   evKeepAwakeState,
   evModel,
   evResult,
@@ -488,6 +513,7 @@ export const PAYLOAD_TYPES = {
   evQuestionRequest: 'ev.question_request',
   evQuestionResolved: 'ev.question_resolved',
   evRunState: 'ev.run_state',
+  evTodo: 'ev.todo',
   evKeepAwakeState: 'ev.keep_awake_state',
   evModel: 'ev.model',
   evResult: 'ev.result',
