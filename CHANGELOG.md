@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [1.4.0] - 2026-10-05
+
+### 新增：`ev.todo` —— 待办清单全量快照帧
+
+手机聊天页顶部那颗待办条的数据源。内核 `todo/write` 每次整份下发
+（`TodoItem = {content, status: pending|in_progress|completed}`），协议原样收成快照：
+手机不做增量，也不需要理解"改了哪条"。
+
+三条约定：`status` 只认内核那三个值（未知值由宿主侧降级，协议层不放行）；
+`content` 不限形状只限长度（宿主侧夹 200 字）；**空数组是合法载荷**——
+内核清空清单时手机必须跟着清。出站构造器 `todoList({todos, sessionId?})`。
+
+向后兼容：老手机收到不认识的 `t` 静默忽略，所以这一帧可以先于小程序上线。
 ## [1.3.0] - 2026-10-04
 
 ### 新增：`cmd.send_prompt` 可以带图片附件
