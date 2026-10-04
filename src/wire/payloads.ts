@@ -252,9 +252,12 @@ export const evResult = z.object({
  * 同一套规则就得写第二遍，而两份实现迟早分叉——表现是"实时看着对、历史看着怪"，
  * 这种缺陷很难靠肉眼发现。
  *
- * 深不递归：这里只允许两种**叶子**载荷，`ev.session_history` 自身不在其中。
+ * 深不递归：这里只允许三种**叶子**载荷，`ev.session_history` 自身不在其中。
+ * 第三种是 `evTodo`（2026-10-05 补）：待办是**全量快照**，一页里最后一条就是那一页
+ * 截止时的清单；回放它让"进一条跑过的会话也看得见待办"成立，不用等下一次
+ * `todo/write`。老手机回放到不认识的 `t` 会静默跳过（分发是 `if (p.t === …)` 串）。
  */
-const historyItem = z.discriminatedUnion('t', [evMessageDelta, evToolEvent])
+const historyItem = z.discriminatedUnion('t', [evMessageDelta, evToolEvent, evTodo])
 /** 历史里的一条。 */
 export type HistoryItem = z.infer<typeof historyItem>
 

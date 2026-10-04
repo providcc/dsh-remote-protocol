@@ -183,3 +183,31 @@ test('sessionHistory：条目里的 sessionId 可以缺省（外层已经带了�
   assert.deepEqual(keysOf(page.items[0] ?? {}), ['callId', 'phase', 't', 'tool'])
   assert.notEqual(parseEvPayload(page), null)
 })
+
+test('sessionHistory：待办快照也能进历史页（一页里最后一条就是那一页截止时的清单）', () => {
+  const page = sessionHistory({
+    sessionId: 'ses_1',
+    cmdId: 'c1',
+    items: [
+      { t: 'ev.message_delta', messageId: 'm1', delta: '先看协议', role: 'user', done: true },
+      { t: 'ev.todo', todos: [{ content: '改完跑全链路', status: 'in_progress' }] },
+      { t: 'ev.todo', todos: [{ content: '改完跑全链路', status: 'completed' }] },
+    ],
+  })
+  const parsed = parseEvPayload(page)
+  assert.notEqual(parsed, null, '带 ev.todo 的历史页必须能解出来')
+  const items = (parsed as { items?: { t: string; todos?: unknown[] }[] }).items ?? []
+  const todos = items.filter((item) => item.t === 'ev.todo')
+  assert.equal(todos.length, 2, '两条快照都要在（全量语义，不折叠）')
+  assert.deepEqual(todos[1]?.todos, [{ content: '改完跑全链路', status: 'completed' }], '最后一条是那一页截止时的清单')
+})
+
+test('sessionHistory：待办条目的 sessionId 不进条目（外层已带，与另两种叶子同一纪律）', () => {
+  const page = sessionHistory({
+    sessionId: 'ses_1',
+    cmdId: 'c1',
+    items: [{ t: 'ev.todo', todos: [{ content: '写判据', status: 'pending' }] }],
+  })
+  assert.deepEqual(keysOf(page.items[0] ?? {}), ['t', 'todos'])
+  assert.notEqual(parseEvPayload(page), null)
+})
