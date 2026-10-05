@@ -116,8 +116,9 @@ test('出站载荷都能被解析，且字段名与 schema 一致', () => {
       sessionId: 'ses_1',
     }),
     todoList({ todos: [] }),
-    model({ model: 'deepseek-chat', canSwitch: false, reason: '这一代内核只能读当前模型' }),
+    model({ sessionId: 'ses_1', model: 'deepseek-chat', canSwitch: false, reason: '这一代内核只能读当前模型' }),
     model({
+      sessionId: 'ses_1',
       model: 'deepseek-chat',
       canSwitch: true,
       provider: 'deepseek',
@@ -133,22 +134,32 @@ test('出站载荷都能被解析，且字段名与 schema 一致', () => {
 
 test('model：canSwitch=false 时不下发候选（空数组会让两种"不能切"在手机上一回事）', () => {
   const readOnly = model({
+    sessionId: 'ses_1',
     model: 'deepseek-chat',
     canSwitch: false,
     options: [{ value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' }],
     reason: '这一代内核只能读当前模型',
   })
-  assert.deepEqual(keysOf(readOnly), ['canSwitch', 'model', 'reason', 't'], '候选被构造器吃掉了')
+  assert.deepEqual(keysOf(readOnly), ['canSwitch', 'model', 'reason', 'sessionId', 't'], '候选被构造器吃掉了')
   assert.notEqual(parseEvPayload(readOnly), null)
 
   // 空清单同理：canSwitch=true 却没有候选，手机会渲染出一个点的下拉。
-  const empty = model({ model: 'deepseek-chat', canSwitch: true, options: [] })
+  const empty = model({ sessionId: 'ses_1', model: 'deepseek-chat', canSwitch: true, options: [] })
   assert.equal('options' in empty, false)
 })
 
-test('model：sessionId 一个都不许带（模型是全局的，不属于任何会话）', () => {
-  const m = model({ model: 'deepseek-chat', canSwitch: false, provider: 'deepseek' })
-  assert.equal('sessionId' in m, false)
+test('model：必须带 sessionId（2026-10-05 用户实测：本会话 space-bunny-free，顶栏显示别的会话的 muse-spark）', () => {
+  // 这条判据原来是反的——它断言「sessionId 一个都不许带，模型是全局的」，
+  // 于是把**串台写进了协议**。模型是按会话的；全局的只是"新会话默认用哪个"，
+  // 拿那个显示，就是用户看到 muse-spark 的直接原因。
+  const m = model({ sessionId: 'ses_1', model: 'deepseek-chat', canSwitch: false, provider: 'deepseek' })
+  assert.equal(m.sessionId, 'ses_1', '不带会话就无法过滤，别的会话一帧就覆盖本会话')
+  assert.notEqual(parseEvPayload(m), null)
+})
+
+test('model：sessionId 缺失的帧解析不过（老主机的全局帧宁可被丢掉，也不显示错的）', () => {
+  const legacy = { t: 'ev.model', model: 'muse-spark', canSwitch: false }
+  assert.equal(parseEvPayload(legacy), null, '没有会话归属的模型帧必须被拒')
 })
 
 test('makeError：message 缺席时不留空键（否则对侧会读到 undefined 文案）', () => {

@@ -265,6 +265,17 @@ export type ModelOption = z.infer<typeof modelOption>
  */
 export const evModel = z.object({
   t: z.literal('ev.model'),
+  /**
+   * **哪条会话**在用这个模型。
+   *
+   * 以前这个字段根本不存在，mp 端把它当全局值显示（2026-10-05 用户实测：
+   * 当前会话跑 space-bunny-free，顶栏却显示别的会话切出来的 muse-spark）。
+   * 模型是**按会话**的，不带 sessionId 就无法过滤——任何一条别的会话的
+   * 模型帧都会覆盖本会话的显示。
+   *
+   * 必填：老主机不带这个字段时 mp 端宁可忽略这一帧，也不显示错的。
+   */
+  sessionId: nonEmpty,
   provider: nonEmpty.optional(),
   model: nonEmpty,
   /** 主机能不能换。false 时小程序**不许**渲染成可点的下拉。 */

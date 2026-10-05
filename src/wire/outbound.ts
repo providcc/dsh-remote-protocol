@@ -217,13 +217,20 @@ export function keepAwakeState(args: {
  * 推断出来的判断在"清单刚好为空"时会静默错成不可切。
  */
 export function model(args: {
+  sessionId: string
   model: string
   canSwitch: boolean
   provider?: string
   options?: ModelOption[]
   reason?: string
 }): EvModel {
-  const payload: EvModel = { t: PAYLOAD_TYPES.evModel, model: args.model, canSwitch: args.canSwitch }
+  const payload: EvModel = {
+    t: PAYLOAD_TYPES.evModel,
+    // sessionId 必填：模型是按会话的，没有它 mp 端无法过滤（§9.29.21）。
+    sessionId: args.sessionId,
+    model: args.model,
+    canSwitch: args.canSwitch,
+  }
   if (args.provider !== undefined) payload.provider = args.provider
   // 不可切时**不下发**候选：空数组会让"有候选但都不可选"和"没有候选"在手机上一回事。
   if (args.canSwitch && args.options?.length) payload.options = args.options
