@@ -369,3 +369,29 @@ test('isoOrUndefined：数字转 ISO、ISO 串原样、垃圾值省略字段（F
     assert.equal(isoOrUndefined(bad), undefined, String(bad))
   }
 })
+
+test('send_prompt 的 files：可选、保留扩展名、上限 4 个（图片之外的文件附件）', () => {
+  const base = { t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 's1', text: 'hi' }
+  const one = { name: 'report.pdf', mediaType: 'pdf', data: 'SlBFR0JZVEVT' }
+  // 不带 files：老版本手机照旧发得出去（与 images 同一条理由：增补，不是改语义）
+  assert.ok(cmdSendPrompt.safeParse(base).success)
+  assert.ok(cmdSendPrompt.safeParse({ ...base, files: [one] }).success)
+  assert.ok(cmdSendPrompt.safeParse({ ...base, files: Array.from({ length: 4 }, () => one) }).success)
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, files: Array.from({ length: 5 }, () => one) }).success)
+  // data 空串不行：主机那头会写出一个 0 字节文件，而用户以为自己发上去了
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, files: [{ ...one, data: '' }] }).success)
+  // name 空串不行。空名字在主机侧只能兜底成 file-1，用户对不上自己发的是哪个
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, files: [{ ...one, name: '' }] }).success)
+  // mediaType 可以不带（有些文件类型微信那头给不出来），带了也只是个标签：
+  // 主机不靠它做判断，所以这里不收紧成白名单。
+  assert.ok(cmdSendPrompt.safeParse({ ...base, files: [{ name: 'a.bin', data: 'AA==' }] }).success)
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, files: [{ ...one, mediaType: 'x'.repeat(65) }] }).success)
+  // 图片与文件可以同时带：用户完全可能又发一张截图又发一份文档
+  assert.ok(
+    cmdSendPrompt.safeParse({
+      ...base,
+      images: [{ name: 'a.jpg', mediaType: 'image/jpeg', data: 'SlBFR0JZVEVT' }],
+      files: [one],
+    }).success,
+  )
+})

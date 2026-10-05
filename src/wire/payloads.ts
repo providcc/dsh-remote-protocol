@@ -370,6 +370,33 @@ export const imageAttachment = z.object({
 })
 export type ImageAttachment = z.infer<typeof imageAttachment>
 
+/**
+ * 文件附件（2026-10-05 加，用户："文件附件也支持一下"）。
+ *
+ * 与图片的三处不同，都是被文件这件事本身逼出来的：
+ * 1. **没有 mediaType 白名单**。图片那边收 `image/jpeg` 字面量，是因为相册出来
+ *    必然能被画布重编码成 jpeg；文件没有这一步，pdf/doc/xlsx 各有各的格式，
+ *    主机这边只记录类型、不解析内容（真要解析得引入一整柜 MIME 嗅探，不值）。
+ * 2. **没有体积以外的第二道内容校验**。图片有 JPEG 魔数，文件的"魔数"族类太多，
+ *    所以纪律全落在 mp 侧的两道闸与主机的单条上限上。
+ * 3. **文件名就是落盘名**（图片会被强改成 .jpg）。扩展名必须留着——Agent
+ *    认文件靠的就是它。收敛仍走 `safeSegment`：手机传来的名字是不可信输入。
+ *
+ * 与图片共用同一条预算（见 `MAX_ATTACH_TOTAL_BYTES`）：中继单帧 1MB 是硬上限，
+ * 超了不是"发不出去"而是整帧被掐、socket 1009 断开。所以文件也不做压缩——
+ * 超预算的被挡下并说清，而不是悄悄砍掉一半内容。
+ */
+export const fileAttachment = z.object({
+  /** 落盘用的文件名（mp 侧来自 `chooseMessageFile` 的 name，形如 `report.pdf`）。 */
+  name: nonEmpty,
+  /** 类型标签（mp 侧用 `chooseMessageFile` 的 type，即不带点的扩展名）。只记录，不解析。 */
+  mediaType: z.string().max(64).optional(),
+  /** base64 字节，**不带** `data:` 前缀。 */
+  data: nonEmpty,
+})
+
+export type FileAttachment = z.infer<typeof fileAttachment>
+
 export const cmdSendPrompt = z.object({
   t: z.literal('cmd.send_prompt'),
   cmdId: nonEmpty,
@@ -382,6 +409,11 @@ export const cmdSendPrompt = z.object({
    * 上限 4 张：再多对"看清楚这张图"没有帮助，只是把帧撑爆。
    */
   images: z.array(imageAttachment).max(4).optional(),
+  /**
+   * 随消息的文件附件。与 images 同一条理由（可选、strip、不升版本）。
+   * 上限 4 个：再多就不是"随手带个文件"，该换成别的方式交付。
+   */
+  files: z.array(fileAttachment).max(4).optional(),
 })
 
 const answerItem = z.object({
