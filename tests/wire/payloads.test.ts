@@ -9,15 +9,19 @@ import {
   PAYLOAD_TYPES,
   SESSION_STATES,
   cmdAnswer,
+  cmdPayload,
   cmdKeepAwake,
   cmdNewSession,
+  cmdDropQueued,
   cmdResolvePermission,
   cmdSendPrompt,
   cmdSessionHistory,
+  evQueue,
   isoOrUndefined,
   parseCmdPayload,
   parseEvPayload,
 } from '../../src/wire/payloads.js'
+import { queueSnapshot } from '../../src/wire/outbound.js'
 
 test('八个命令逐个通过；t 拼错的载荷必须被拒（不认识的命令不能当命令执行）', () => {
   assert.ok(parseCmdPayload({ t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 'ses_1', text: '只回复 ok' }))
@@ -395,3 +399,41 @@ test('send_prompt 的 files：可选、保留扩展名、上限 4 个（图片�
     }).success,
   )
 })
+
+test('send_prompt 的 queueId：可选、手机编的、主机原样对（排队要双向同步）', () => {
+  const base = { t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 's1', text: 'hi' }
+  // 不带：老版本手机照旧发得出去（增补，不是改语义）
+  assert.ok(cmdSendPrompt.safeParse(base).success)
+  assert.ok(cmdSendPrompt.safeParse({ ...base, queueId: 'q-7' }).success)
+  // 太长不行：它要被写进 ev.queue 快照，一条帧里可能带好几条
+  assert.ok(!cmdSendPrompt.safeParse({ ...base, queueId: 'x'.repeat(65) }).success)
+})
+
+test('cmd.drop_queued：删一条主机还扣着的消息；queueId 不能空', () => {
+  const one = { t: 'cmd.drop_queued', cmdId: 'c1', sessionId: 's1', queueId: 'q-7' }
+  assert.ok(cmdPayload.safeParse(one).success)
+  // 空 queueId 不行：主机无从知道删哪条，而"删了但不知道删没删"比拒绝更难查
+  assert.ok(!cmdPayload.safeParse({ ...one, queueId: '' }).success)
+  assert.ok(!cmdPayload.safeParse({ ...one, sessionId: '' }).success)
+})
+
+test('ev.queue：全量快照，三种状态，失败带原因', () => {
+  const item = { queueId: 'q-1', text: '帮我看下', state: 'held' as const }
+  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [item] }).success)
+  // 三种状态都要认
+  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'sent' }] }).success)
+  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'failed', message: '会话没有活的 agent' }] }).success)
+  // 只带附件的消息 text 是空的，但两个计数要说清
+  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, text: '', images: 2, files: 1 }] }).success)
+  // 不认识的状态不行：手机按 state 决定给不给删除按钮
+  assert.ok(!evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'vanished' }] }).success)
+  // sessionId 不能空：不分会话的快照会让另一条会话的排队消息跑到这一页来
+  assert.ok(!evQueue.safeParse({ t: 'ev.queue', sessionId: '', items: [item] }).success)
+  // 出站构造器：只发该发的字段
+  assert.deepEqual(queueSnapshot({ sessionId: 's1', items: [item] }), {
+    t: 'ev.queue',
+    sessionId: 's1',
+    items: [item],
+  })
+})
+

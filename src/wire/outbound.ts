@@ -27,6 +27,8 @@ import {
   type EvQuestionRequest,
   type EvQuestionResolved,
   type EvResult,
+  type EvQueue,
+  type QueueItem,
   type EvRunState,
   type EvSessionChanged,
   type EvTodo,
@@ -183,6 +185,12 @@ export function runState(args: { state: 'running' | 'idle'; detail?: string; ses
  * 待办清单（全量快照）。内核每次 `todo/write` 都给整份，所以这里也只发整份——
  * 增量（增删改某一条）在协议里没有形状，手机也不需要理解"改了哪条"。
  */
+/**
+ * 排队消息全量快照。与 todoList 同一条理由（全量、不增量）。
+ */
+export function queueSnapshot(args: { items: QueueItem[]; sessionId: string }): EvQueue {
+  return { t: PAYLOAD_TYPES.evQueue, ...args }
+}
 export function todoList(args: { todos: TodoItem[]; sessionId?: string }): EvTodo {
   return { t: PAYLOAD_TYPES.evTodo, ...args }
 }
