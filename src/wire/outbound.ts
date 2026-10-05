@@ -77,8 +77,10 @@ export function peerJoinedForHost(sessionId: string, clientId: string, pairingTo
  * `peer-left` 只有一个合法触发：**主机离开**。
  * 参数表里刻意没有"告诉某个客户端别人走了"的形态——那种帧会让别的手机无辜丢配对（F5）。
  */
-export function peerLeft(sessionId: string, clientId: string): RelayOutbound {
-  return { t: 'peer-left', sessionId, clientId }
+export function peerLeft(sessionId: string, clientId: string, unpaired?: boolean): RelayOutbound {
+  // unpaired 缺省就是「没这个字段」而不是 false：老主机按「没带 = 断线」处理，
+  // 显式 false 反而会让它以为这是一次被判定过的断线。
+  return { t: 'peer-left', sessionId, clientId, ...(unpaired ? { unpaired: true } : {}) }
 }
 
 export function makeError(code: ErrorCode, message?: string): RelayOutbound {

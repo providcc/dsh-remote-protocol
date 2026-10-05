@@ -205,6 +205,21 @@ export const peerLeftFrame = z.object({
   t: z.literal('peer-left'),
   sessionId: nonEmpty,
   clientId: nonEmpty,
+  /**
+   * **这一条是不是「主动解配」**（可选，2026-10-05）。
+   *
+   * 为什么必须能区分：发给主机的 `peer-left` 有两个触发，现场长得一模一样——
+   *   - 手机点了「解除配对」（发 session-leave）：它 `_forgetPairing()` 清了 convId，
+   *     **再也不会带这个 convId 回来**。主机留着这条会话就是一条永远清不掉的幽灵。
+   *   - 手机 socket 断了（切后台、断网）：D3 要求会话留着，回前台还要用它。
+   *
+   * 不带这个标记 = 断线（老中继行为，保持 D3）；带 true = 主动解配，主机应当把
+   * 会话一并作废，于是 pill 从「手机离线」回到「未配对」（2026-10-05 用户报：
+   * 「mp 端解除配对，dsh 端执行的是手机离线」）。
+   *
+   * 可选是刻意的：老中继不会带这个字段，主机必须仍按「断线」处理，不能假定。
+   */
+  unpaired: z.boolean().optional(),
 })
 
 export const errorCodes = [
