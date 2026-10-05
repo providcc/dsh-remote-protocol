@@ -422,9 +422,17 @@ test('ev.queue：全量快照，三种状态，失败带原因', () => {
   assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [item] }).success)
   // 三种状态都要认
   assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'sent' }] }).success)
-  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'failed', message: '会话没有活的 agent' }] }).success)
+  assert.ok(
+    evQueue.safeParse({
+      t: 'ev.queue',
+      sessionId: 's1',
+      items: [{ ...item, state: 'failed', message: '会话没有活的 agent' }],
+    }).success,
+  )
   // 只带附件的消息 text 是空的，但两个计数要说清
-  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, text: '', images: 2, files: 1 }] }).success)
+  assert.ok(
+    evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, text: '', images: 2, files: 1 }] }).success,
+  )
   // 不认识的状态不行：手机按 state 决定给不给删除按钮
   assert.ok(!evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'vanished' }] }).success)
   // sessionId 不能空：不分会话的快照会让另一条会话的排队消息跑到这一页来
@@ -436,4 +444,3 @@ test('ev.queue：全量快照，三种状态，失败带原因', () => {
     items: [item],
   })
 })
-

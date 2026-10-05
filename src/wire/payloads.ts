@@ -360,6 +360,8 @@ export type CmdResolvePermission = z.infer<typeof cmdResolvePermission>
 export type CmdInterrupt = z.infer<typeof cmdInterrupt>
 /** cmdListSessions 的推导类型。 */
 export type CmdListSessions = z.infer<typeof cmdListSessions>
+/** cmdGetQueue 的推导类型。 */
+export type CmdGetQueue = z.infer<typeof cmdGetQueue>
 /** cmdKeepAwake 的推导类型。 */
 export type CmdKeepAwake = z.infer<typeof cmdKeepAwake>
 /** cmdNewSession 的推导类型。 */
@@ -515,6 +517,23 @@ export const cmdDropQueued = z.object({
   sessionId: nonEmpty,
   queueId: nonEmpty,
 })
+/**
+ * 拉取某个会话当前的排队快照。
+ *
+ * **为什么必须有这个命令**（2026-10-05 用户实测：mp 端进来会话没有加载当前的
+ * 排队消息）：此前 ev.queue 只在**状态变化时**被动推送，而手机进入一个会话、
+ * 从后台切回前台、或刚重连时，主机这边什么变化都没有发生——于是没有任何一帧会来，
+ * 手机上就是空的。纯推送模型在没有触发点时必然失效。
+ *
+ * 所以补一条主动拉取：手机每次进入会话/回前台都发这个，主机立刻回当前全量。
+ * 这与“以 dsh 为准”是同一件事——主机是唯一真相源，手机进入时来问它要。
+ */
+export const cmdGetQueue = z.object({
+  t: z.literal('cmd.get_queue'),
+  cmdId: nonEmpty,
+  sessionId: nonEmpty,
+})
+
 export const cmdListSessions = z.object({
   t: z.literal('cmd.list_sessions'),
   cmdId: nonEmpty,
@@ -578,6 +597,7 @@ export const cmdPayload = z.discriminatedUnion('t', [
   cmdResolvePermission,
   cmdInterrupt,
   cmdDropQueued,
+  cmdGetQueue,
   cmdListSessions,
   cmdKeepAwake,
   cmdSessionHistory,
@@ -604,6 +624,7 @@ export const PAYLOAD_TYPES = {
   cmdResolvePermission: 'cmd.resolve_permission',
   cmdInterrupt: 'cmd.interrupt',
   cmdDropQueued: 'cmd.drop_queued',
+  cmdGetQueue: 'cmd.get_queue',
   cmdListSessions: 'cmd.list_sessions',
   cmdKeepAwake: 'cmd.keep_awake',
   cmdSessionHistory: 'cmd.session_history',
