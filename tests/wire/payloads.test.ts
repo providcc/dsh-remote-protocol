@@ -12,16 +12,14 @@ import {
   cmdPayload,
   cmdKeepAwake,
   cmdNewSession,
-  cmdDropQueued,
   cmdResolvePermission,
   cmdSendPrompt,
   cmdSessionHistory,
-  evQueue,
   isoOrUndefined,
   parseCmdPayload,
   parseEvPayload,
 } from '../../src/wire/payloads.js'
-import { queueSnapshot } from '../../src/wire/outbound.js'
+
 
 test('八个命令逐个通过；t 拼错的载荷必须被拒（不认识的命令不能当命令执行）', () => {
   assert.ok(parseCmdPayload({ t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 'ses_1', text: '只回复 ok' }))
@@ -52,6 +50,7 @@ test('八个命令逐个通过；t 拼错的载荷必须被拒（不认识的命
   assert.equal(parseCmdPayload({ t: 'cmd.subscribe', cmdId: 'c1' }), null, '已删除的 no-op 命令不再被认')
 })
 
+
 test('cmd.new_session：只带 cmdId，命名与 id 都归主机', () => {
   assert.ok(cmdNewSession.safeParse({ t: 'cmd.new_session', cmdId: 'c' }).success)
   // cmdId 是回执对答的钥匙（手机靠它认出"这是我那次新建的结果"），空的会让回执无处可归
@@ -63,6 +62,7 @@ test('cmd.new_session：只带 cmdId，命名与 id 都归主机', () => {
   assert.equal('sessionId' in stripped, false)
   assert.equal('title' in stripped, false)
 })
+
 
 test('session_history：beforeSeq/limit 都可省（省 = 要最新一页），limit 上界 200', () => {
   assert.ok(cmdSessionHistory.safeParse({ t: 'cmd.session_history', cmdId: 'c', sessionId: 's' }).success)
@@ -84,6 +84,7 @@ test('session_history：beforeSeq/limit 都可省（省 = 要最新一页），l
   assert.equal(cmdSessionHistory.safeParse({ t: 'cmd.session_history', cmdId: 'c', sessionId: '' }).success, false)
 })
 
+
 test('ev.session_history：条目只允许实时流那两种叶子载荷（不递归、不夹带运行态）', () => {
   const ok = {
     t: 'ev.session_history',
@@ -103,6 +104,7 @@ test('ev.session_history：条目只允许实时流那两种叶子载荷（不�
   assert.equal(parseEvPayload({ ...ok, items: [ok] }), null)
 })
 
+
 test('ev.session_history：只有游标、没有 hasMore —— 一个字段就没有"自相矛盾"这种状态', () => {
   const base = { t: 'ev.session_history', sessionId: 'ses_1', cmdId: 'c1', items: [] }
   assert.notEqual(parseEvPayload(base), null, '没有游标 = 这是最初的一页')
@@ -112,6 +114,7 @@ test('ev.session_history：只有游标、没有 hasMore —— 一个字段就�
   assert.equal(parseEvPayload({ ...base, nextBeforeSeq: 1.5 }), null)
   assert.equal(parseEvPayload({ ...base, items: 'x' }), null)
 })
+
 
 test('命令必填项缺一即拒（cmdId 是回执对答的唯一凭据）', () => {
   for (const bad of [
@@ -128,6 +131,7 @@ test('命令必填项缺一即拒（cmdId 是回执对答的唯一凭据）', ()
   }
 })
 
+
 test('keep_awake：idleReleaseSec 允许 0（含义是永不自动释放），拒负数与小数', () => {
   assert.ok(cmdKeepAwake.safeParse({ t: 'cmd.keep_awake', cmdId: 'c', enabled: true, idleReleaseSec: 0 }).success)
   assert.ok(cmdKeepAwake.safeParse({ t: 'cmd.keep_awake', cmdId: 'c', enabled: true, idleReleaseSec: 600 }).success)
@@ -141,6 +145,7 @@ test('keep_awake：idleReleaseSec 允许 0（含义是永不自动释放），�
   )
   assert.equal(cmdKeepAwake.safeParse({ t: 'cmd.keep_awake', cmdId: 'c', enabled: 'yes' }).success, false)
 })
+
 
 test('decision 不做枚举收紧：手机回传的是主机下发的 options[].id，逐字', () => {
   const parsed = cmdResolvePermission.safeParse({
@@ -161,6 +166,7 @@ test('decision 不做枚举收紧：手机回传的是主机下发的 options[].
   })
   assert.equal(custom.success, true, '将来加自定义选项时不该被协议层挡掉')
 })
+
 
 test('answer 的 freeText 可以整个缺席（小程序只在用户填了才带上）', () => {
   assert.ok(
@@ -183,9 +189,11 @@ test('answer 的 freeText 可以整个缺席（小程序只在用户填了才带
   )
 })
 
+
 test('send_prompt 的 text 允许空串（"只带附件"这类将来态不该被协议层拒）', () => {
   assert.ok(cmdSendPrompt.safeParse({ t: 'cmd.send_prompt', cmdId: 'c', sessionId: 's', text: '' }).success)
 })
+
 
 test('send_prompt 的 images：可选、只认 jpeg、上限 4 张、data 非空', () => {
   const base = { t: 'cmd.send_prompt', cmdId: 'c', sessionId: 's', text: '看这张' }
@@ -208,6 +216,7 @@ test('send_prompt 的 images：可选、只认 jpeg、上限 4 张、data 非空
   assert.ok(!cmdSendPrompt.safeParse({ ...base, images: [{ ...one, height: 1.5 }] }).success)
 })
 
+
 test('事件：message_delta 必须有 messageId；done 是可选布尔；delta 允许空串', () => {
   assert.ok(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1', delta: 'hi' }))
   assert.ok(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1', delta: '', done: true }))
@@ -215,6 +224,7 @@ test('事件：message_delta 必须有 messageId；done 是可选布尔；delta 
   assert.equal(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1' }), null, 'delta 缺省不行')
   assert.equal(parseEvPayload({ t: 'ev.message_delta', messageId: 'm1', delta: 3 }), null)
 })
+
 
 test('事件：tool_event 的 phase 是封闭枚举，callId 必填', () => {
   assert.ok(parseEvPayload({ t: 'ev.tool_event', callId: 'x', phase: 'started' }))
@@ -225,6 +235,7 @@ test('事件：tool_event 的 phase 是封闭枚举，callId 必填', () => {
   assert.equal(parseEvPayload({ t: 'ev.tool_event', phase: 'started' }), null)
 })
 
+
 test('事件：run_state 只认 running/idle 两个值（第三种状态会让卡片挂在手机上不消失）', () => {
   assert.ok(parseEvPayload({ t: 'ev.run_state', state: 'running' }))
   assert.ok(parseEvPayload({ t: 'ev.run_state', state: 'idle', detail: 'interrupted' }))
@@ -232,6 +243,7 @@ test('事件：run_state 只认 running/idle 两个值（第三种状态会让�
     assert.equal(parseEvPayload({ t: 'ev.run_state', state }), null, state)
   }
 })
+
 
 test('事件：session_changed 的 sessions 是必填数组，元素 state 也是封闭枚举', () => {
   assert.ok(parseEvPayload({ t: 'ev.session_changed', sessions: [] }))
@@ -259,6 +271,7 @@ test('事件：session_changed 的 sessions 是必填数组，元素 state 也�
   )
 })
 
+
 test('事件：keep_awake_state 的四个必填字段一个都不能少（手机靠它们回显开关）', () => {
   const full = { t: 'ev.keep_awake_state', enabled: true, active: false, platform: 'darwin', backend: 'caffeinate' }
   assert.ok(parseEvPayload(full))
@@ -271,6 +284,7 @@ test('事件：keep_awake_state 的四个必填字段一个都不能少（手机
   assert.ok(stripped)
   assert.equal('sessionId' in stripped, false, 'sessionId 会被剥掉：这个 payload 按契约不带会话归属（F11）')
 })
+
 
 test('ev.permission_resolved：收回卡片只认 requestId，by 可选但不许是别的词', () => {
   // 没有 requestId 就收不了任何一张卡——手机是靠它对上号的，所以这条必须红。
@@ -286,6 +300,7 @@ test('ev.permission_resolved：收回卡片只认 requestId，by 可选但不许
     'by 是"谁收的场"，不是审批结果；放开取值会让手机那边要维护一张语义表',
   )
 })
+
 
 test('事件：permission/question 的 requestId 与 questions[].id 是回传映射的锚', () => {
   assert.equal(parseEvPayload({ t: 'ev.permission_request', action: '执行 bash' }), null)
@@ -322,6 +337,7 @@ test('事件：permission/question 的 requestId 与 questions[].id 是回传映
   assert.equal(parseEvPayload({ t: 'ev.question_request', requestId: 'q', questions: [{}] }), null)
 })
 
+
 test('ev.question_request 的 expiresAt 是可选的：老宿主不发，手机就不许显示"undefined 秒"', () => {
   const base = { t: 'ev.question_request', requestId: 'q', questions: [{ id: 'q1', question: '要哪个？' }] }
   assert.ok(parseEvPayload(base), '不带 expiresAt 必须仍然成立（这一帧刚补这个字段，宿主两侧不会同时升级）')
@@ -332,6 +348,7 @@ test('ev.question_request 的 expiresAt 是可选的：老宿主不发，手机�
     'expiresAt 只收字符串：手机上那颗倒计时读的是 Date.parse，喂数字会静默变 NaN',
   )
 })
+
 
 test('ev.question_resolved：收回提问卡只认 requestId，by 可选但不许是别的词', () => {
   assert.equal(parseEvPayload({ t: 'ev.question_resolved' }), null)
@@ -344,11 +361,13 @@ test('ev.question_resolved：收回提问卡只认 requestId，by 可选但不�
   )
 })
 
+
 test('事件：result 的 cmdId 允许空串（host 兜底回执拿不到 cmdId 时就是这么发）', () => {
   assert.ok(parseEvPayload({ t: 'ev.result', cmdId: '', ok: false, message: '载荷处理失败' }))
   assert.ok(parseEvPayload({ t: 'ev.result', cmdId: 'c1', ok: true, data: { sessions: [] } }))
   assert.equal(parseEvPayload({ t: 'ev.result', cmdId: 'c1', ok: 'true' }), null)
 })
+
 
 test('未知载荷类型一律拒（新增名字要在协议层登记，不能靠"猜形状"）', () => {
   assert.equal(parseEvPayload({ t: 'ev.whatever', x: 1 }), null)
@@ -356,6 +375,7 @@ test('未知载荷类型一律拒（新增名字要在协议层登记，不能�
   assert.equal(parseCmdPayload('cmd.list_sessions'), null)
   assert.equal(parseEvPayload({}), null)
 })
+
 
 test('PAYLOAD_TYPES 与 schema 里的字面量一致（防止常量与实现分叉）', () => {
   const declared = Object.values(PAYLOAD_TYPES)
@@ -365,6 +385,7 @@ test('PAYLOAD_TYPES 与 schema 里的字面量一致（防止常量与实现分�
   assert.equal(new Set(declared).size, declared.length, '常量表里不许有重复值')
 })
 
+
 test('isoOrUndefined：数字转 ISO、ISO 串原样、垃圾值省略字段（F7 的生产侧兜底）', () => {
   const iso = new Date(1_700_000_000_000).toISOString()
   assert.equal(isoOrUndefined(1_700_000_000_000), iso)
@@ -373,6 +394,7 @@ test('isoOrUndefined：数字转 ISO、ISO 串原样、垃圾值省略字段（F
     assert.equal(isoOrUndefined(bad), undefined, String(bad))
   }
 })
+
 
 test('send_prompt 的 files：可选、保留扩展名、上限 4 个（图片之外的文件附件）', () => {
   const base = { t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 's1', text: 'hi' }
@@ -398,49 +420,4 @@ test('send_prompt 的 files：可选、保留扩展名、上限 4 个（图片�
       files: [one],
     }).success,
   )
-})
-
-test('send_prompt 的 queueId：可选、手机编的、主机原样对（排队要双向同步）', () => {
-  const base = { t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 's1', text: 'hi' }
-  // 不带：老版本手机照旧发得出去（增补，不是改语义）
-  assert.ok(cmdSendPrompt.safeParse(base).success)
-  assert.ok(cmdSendPrompt.safeParse({ ...base, queueId: 'q-7' }).success)
-  // 太长不行：它要被写进 ev.queue 快照，一条帧里可能带好几条
-  assert.ok(!cmdSendPrompt.safeParse({ ...base, queueId: 'x'.repeat(65) }).success)
-})
-
-test('cmd.drop_queued：删一条主机还扣着的消息；queueId 不能空', () => {
-  const one = { t: 'cmd.drop_queued', cmdId: 'c1', sessionId: 's1', queueId: 'q-7' }
-  assert.ok(cmdPayload.safeParse(one).success)
-  // 空 queueId 不行：主机无从知道删哪条，而"删了但不知道删没删"比拒绝更难查
-  assert.ok(!cmdPayload.safeParse({ ...one, queueId: '' }).success)
-  assert.ok(!cmdPayload.safeParse({ ...one, sessionId: '' }).success)
-})
-
-test('ev.queue：全量快照，三种状态，失败带原因', () => {
-  const item = { queueId: 'q-1', text: '帮我看下', state: 'held' as const }
-  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [item] }).success)
-  // 三种状态都要认
-  assert.ok(evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'sent' }] }).success)
-  assert.ok(
-    evQueue.safeParse({
-      t: 'ev.queue',
-      sessionId: 's1',
-      items: [{ ...item, state: 'failed', message: '会话没有活的 agent' }],
-    }).success,
-  )
-  // 只带附件的消息 text 是空的，但两个计数要说清
-  assert.ok(
-    evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, text: '', images: 2, files: 1 }] }).success,
-  )
-  // 不认识的状态不行：手机按 state 决定给不给删除按钮
-  assert.ok(!evQueue.safeParse({ t: 'ev.queue', sessionId: 's1', items: [{ ...item, state: 'vanished' }] }).success)
-  // sessionId 不能空：不分会话的快照会让另一条会话的排队消息跑到这一页来
-  assert.ok(!evQueue.safeParse({ t: 'ev.queue', sessionId: '', items: [item] }).success)
-  // 出站构造器：只发该发的字段
-  assert.deepEqual(queueSnapshot({ sessionId: 's1', items: [item] }), {
-    t: 'ev.queue',
-    sessionId: 's1',
-    items: [item],
-  })
 })

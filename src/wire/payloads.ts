@@ -193,45 +193,6 @@ export const evTodo = z.object({
   todos: z.array(todoItem),
 })
 
-/**
- * 主机队列里的一条消息（`ev.queue` 的快照项）。
- *
- * 三种状态，对应"这条现在在哪"：
- * - `held`：主机扣着还没转发。**只有这种能删**（agent 的 inbox 不归我们管）。
- * - `sent`：已经 `followup` 出去了，正在等 agent 消化。
- * - `failed`：主机试过但没发出去（会话没活 agent、模型选不到等）。
- *
- * `text` 可能为空（只带了附件的消息），所以两个计数字段都在：
- * 界面上要说清"这是带了几张图的一条"，而不是画一个空气泡。
- */
-export const queueItem = z.object({
-  /** 手机发 send_prompt 时带的那个 queueId，原样回传。 */
-  queueId: nonEmpty,
-  text: z.string(),
-  images: z.number().int().nonnegative().optional(),
-  files: z.number().int().nonnegative().optional(),
-  state: z.enum(['held', 'sent', 'failed']),
-  /** 失败原因；只有 state=failed 时才有。 */
-  message: z.string().optional(),
-})
-export type QueueItem = z.infer<typeof queueItem>
-
-/**
- * 排队消息的**全量快照**（host - client，2026-10-05 用户：排队要双向同步）。
- *
- * 为什么发全量而不是增量：队列短（一条消息最多 4 个附件，排队的通常就几条），
- * 全量让手机拿到就能整体替换，不需要理解"删了哪条、哪条的状态变了"。
- * 内核的 `ev.todo` 也是全量，同一条理由。
- *
- * 队列每次变化都推一次：入队、转发、失败、删除、切换会话。
- * **手机不许在本地增删这条列表**——它是主机状态的镜子，不是手机自己的队列。
- */
-export const evQueue = z.object({
-  t: z.literal('ev.queue'),
-  sessionId: nonEmpty,
-  items: z.array(queueItem).max(64),
-})
-export type EvQueue = z.infer<typeof evQueue>
 export const evKeepAwakeState = z.object({
   t: z.literal('ev.keep_awake_state'),
   enabled: z.boolean(),
@@ -371,8 +332,6 @@ export type CmdResolvePermission = z.infer<typeof cmdResolvePermission>
 export type CmdInterrupt = z.infer<typeof cmdInterrupt>
 /** cmdListSessions 的推导类型。 */
 export type CmdListSessions = z.infer<typeof cmdListSessions>
-/** cmdGetQueue 的推导类型。 */
-export type CmdGetQueue = z.infer<typeof cmdGetQueue>
 /** cmdKeepAwake 的推导类型。 */
 export type CmdKeepAwake = z.infer<typeof cmdKeepAwake>
 /** cmdNewSession 的推导类型。 */
@@ -391,7 +350,6 @@ export const evPayload = z.discriminatedUnion('t', [
   evQuestionRequest,
   evQuestionResolved,
   evRunState,
-  evQueue,
   evTodo,
   evKeepAwakeState,
   evModel,
@@ -467,17 +425,6 @@ export const cmdSendPrompt = z.object({
    * 上限 4 个：再多就不是"随手带个文件"，该换成别的方式交付。
    */
   files: z.array(fileAttachment).max(4).optional(),
-  /**
-   * 手机自己给这条排队消息编的号（2026-10-05 用户：排队要双向同步、手机要能删）。
-   *
-   * 为什么让**手机**编：主机这边编的话，删的时候要先拿 hostId 再换回手机那个 key，
-   * 多一层映射；而手机本来就是拿它当列表 key 的（pending 项的 key）。
-   * 主机只当它是不透明字符串，原样存、原样回、原样拿来删。
-   *
-   * 可选且**老手机不带**：带了就有删除通路，不带就还是老行为（主机自己排队、不给删）。
-   * 长度 64 上限：它要被写进 ev.queue 快照，一条帧里可能带好几条。
-   */
-  queueId: z.string().max(64).optional(),
 })
 
 const answerItem = z.object({
@@ -509,38 +456,6 @@ export const cmdResolvePermission = z.object({
 
 export const cmdInterrupt = z.object({
   t: z.literal('cmd.interrupt'),
-  cmdId: nonEmpty,
-  sessionId: nonEmpty,
-})
-
-/**
- * 删掉一条还在主机队列里等着的消息（2026-10-05 用户：排队要双向同步、手机要能删）。
- *
- * **只能删还没转发的**：主机在自己的队列里扣着消息，空闲时才 followup 出去。
- * 一旦转发出去，agent 的 inbox 就不归我们管了（followup 不返回句柄，宿主也没暴露
- * 删除入口）——那时候回 ok:false 并说清"已经在跑了"，**不给假成功**。
- *
- * queueId 来自手机发 cmd.send_prompt 时带的那个字段，主机原样存、原样对。
- */
-export const cmdDropQueued = z.object({
-  t: z.literal('cmd.drop_queued'),
-  cmdId: nonEmpty,
-  sessionId: nonEmpty,
-  queueId: nonEmpty,
-})
-/**
- * 拉取某个会话当前的排队快照。
- *
- * **为什么必须有这个命令**（2026-10-05 用户实测：mp 端进来会话没有加载当前的
- * 排队消息）：此前 ev.queue 只在**状态变化时**被动推送，而手机进入一个会话、
- * 从后台切回前台、或刚重连时，主机这边什么变化都没有发生——于是没有任何一帧会来，
- * 手机上就是空的。纯推送模型在没有触发点时必然失效。
- *
- * 所以补一条主动拉取：手机每次进入会话/回前台都发这个，主机立刻回当前全量。
- * 这与“以 dsh 为准”是同一件事——主机是唯一真相源，手机进入时来问它要。
- */
-export const cmdGetQueue = z.object({
-  t: z.literal('cmd.get_queue'),
   cmdId: nonEmpty,
   sessionId: nonEmpty,
 })
@@ -607,8 +522,6 @@ export const cmdPayload = z.discriminatedUnion('t', [
   cmdAnswer,
   cmdResolvePermission,
   cmdInterrupt,
-  cmdDropQueued,
-  cmdGetQueue,
   cmdListSessions,
   cmdKeepAwake,
   cmdSessionHistory,
@@ -634,8 +547,6 @@ export const PAYLOAD_TYPES = {
   cmdAnswer: 'cmd.answer',
   cmdResolvePermission: 'cmd.resolve_permission',
   cmdInterrupt: 'cmd.interrupt',
-  cmdDropQueued: 'cmd.drop_queued',
-  cmdGetQueue: 'cmd.get_queue',
   cmdListSessions: 'cmd.list_sessions',
   cmdKeepAwake: 'cmd.keep_awake',
   cmdSessionHistory: 'cmd.session_history',
@@ -648,7 +559,6 @@ export const PAYLOAD_TYPES = {
   evQuestionRequest: 'ev.question_request',
   evQuestionResolved: 'ev.question_resolved',
   evRunState: 'ev.run_state',
-  evQueue: 'ev.queue',
   evTodo: 'ev.todo',
   evKeepAwakeState: 'ev.keep_awake_state',
   evModel: 'ev.model',
