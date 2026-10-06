@@ -61,7 +61,9 @@ test('未编码的 base64 `+` 必须能靠重试路径解出来（B8 的核心�
 })
 
 test('带 `/` 与 `=` 填充的 PSK 往返不变（base64 尾部 = 不能被 query 切分吃掉）', () => {
-  for (const psk of ['a/b/c==', '++++====', generatePsk(), generatePsk()]) {
+  // 2026-10-06：原来这里放的是 `'++++===='` —— 那**不是合法 base64**（`=` 最多两个），
+  // 解析器现在按字符集拒它，于是这条用例等于拿一个非法输入测"往返不变"。换成两条真的。
+  for (const psk of ['ab+/cd==', 'a//+bc==', generatePsk(), generatePsk()]) {
     const uri = buildPairingUri({ server: 'wss://a.b.c/ws', psk })
     assert.equal(parsePairingUri(uri)?.psk, psk)
   }
@@ -125,4 +127,19 @@ test('formatPairingToken：非有限值抛错，不许产出"000NaN"这种配不
 
 test('randomPairingToken 恒为 6 位数字（手输面靠它）', () => {
   for (let i = 0; i < 200; i += 1) assert.match(randomPairingToken(), /^\d{6}$/)
+})
+
+// ── 2026-10-06：解析入口的三条收紧（与小程序侧 parsePairingQr 同步）─────────
+
+test('配对 URI：path 必须是 /p、地址必须 ws(s)、psk 必须像 base64', () => {
+  const good = `dshr:/p?s=wss://x&psk=${encodeURIComponent(PSK)}`
+  assert.ok(parsePairingUri(good), '合法输入必须照收')
+  // path：`dshr:/X?…` 原来也收，而文档语法就是 /p
+  assert.equal(parsePairingUri(`dshr:/X?s=wss://x&psk=${encodeURIComponent(PSK)}`), null)
+  assert.equal(parsePairingUri(`dshr:?s=wss://x&psk=${encodeURIComponent(PSK)}`), null)
+  // 地址：http(s) 连不上 WebSocket，与其拿一条必然失败的地址去连
+  assert.equal(parsePairingUri(`dshr:/p?s=https://x&psk=${encodeURIComponent(PSK)}`), null)
+  // psk 字符集（长度不在这里判：扫码预览与真正连接分两级报错才对得上）
+  assert.equal(parsePairingUri(`dshr:/p?s=wss://x&psk=y`), null)
+  assert.equal(parsePairingUri(`dshr:/p?s=wss://x&psk=${encodeURIComponent('a b c')}`), null)
 })

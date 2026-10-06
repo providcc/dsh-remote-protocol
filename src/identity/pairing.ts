@@ -34,6 +34,12 @@ export interface PairingInfo {
 }
 
 const URI_PREFIX = 'dshr:'
+/**
+ * 标准 base64 的**形状**（含 `+` `/`，padding 为 0～2 个且长度为 4 的倍数；
+ * 不含 url-safe 表，冻结项 B2）。与小程序 `codec.js` 的 `looksLikeBase64` 同一个口径——
+ * 两边判据必须逐字一致，`e2e/protocol.test.mjs` 的向量对拍就是钉这一条的。
+ */
+const BASE64_CHARS = /^[A-Za-z0-9+/]+={0,2}$/
 const TOKEN_RE = /^\d{6}$/
 const DEFAULT_HOST_LABEL = 'dsh'
 
@@ -81,16 +87,26 @@ export function buildPairingUri(info: { server: string; psk: string; hostLabel?:
 /**
  * 解析配对 URI；**任何不合法输入返回 null**（小程序侧同样返回 null，
  * 页面据此弹「无法识别」）。
+ *
+ * 三条收紧（2026-10-06，与小程序侧 `parsePairingQr` 同步；`e2e/protocol.test.mjs`
+ * 用三十多组向量逐条对拍两侧行为）：
+ * 1. path 必须是 `/p`：文档语法就是 `dshr:/p?…`，而原来 `dshr:/X?…` 也照收；
+ * 2. 中继地址必须以 `ws://` / `wss://` 开头——`https://` 连不上 WebSocket，
+ *    与其拿一条必然失败的地址去连，不如当场判"这张码不对"；
+ * 3. `psk` 必须像标准 base64（**只查字符集，不查长度**：长度由手机在
+ *    `client.connect` 那一步再判，"扫码预览"与"真正连接"分两级报错才对得上）。
  */
 export function parsePairingUri(text: string): PairingInfo | null {
   const raw = String(text ?? '')
-  if (!raw.startsWith(URI_PREFIX)) return null
+  if (!raw.startsWith(`${URI_PREFIX}/p?`)) return null
   const cut = raw.indexOf('?')
   if (cut < 0) return null
   const params = readQuery(raw.slice(cut + 1))
   const psk = params.get('psk') ?? ''
   const server = params.get('s') ?? ''
   if (!psk || !server) return null
+  if (!/^wss?:\/\//.test(server)) return null
+  if (psk.length === 0 || psk.length % 4 !== 0 || !BASE64_CHARS.test(psk)) return null
   const token = params.get('t') ?? ''
   return {
     v: 1,
