@@ -5,6 +5,106 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [1.8.1] - 2026-10-06
+
+### 新增：`ev.retry` 与 `ev.compaction`——重试 / 压缩中的回合不再看起来像死掉
+
+真机取证：最近十几份会话日志里 `llm/retry` 与 `compaction/end` 各出现 18 次，
+而插件两条都不映射——主机明明在重试 / 压缩，手机上却是一片空白，
+用户读成"挂了"就手工打断。
+
+- **`ev.retry {sessionId, attempt, max, reason?}`**：第几次 / 共几次 / 什么原因，
+拼出"retrying 2/5: TRANSPORT"够用的三件。`reason` 取的是 `failure.code` 而不是
+`failure.message`（"Connection error." 对人不说明任何事），可空（宿主偶尔不带）；
+`policyKey` 那坨策略 JSON 留在主机，不出站。
+- **`ev.compaction {sessionId, state: started|ended|failed, error?}`**：
+`failed` 与 `ended` 是两件事（真机见过 `summarization produced no text summary content`），
+合并会让用户在上下文已经烂掉时以为一切正常。
+
+出站构造器 `retryNotice()` / `compactionNotice()`。`workspace/changes`
+**故意不映射**：66 个样本全只带 `{turn}`，文件清单在中继够不着的鉴权路由后面——
+"文件变了但说不出是哪些"比不说更糟。
+
+### 破坏性变更：排队那一整套删除（`c5ffb30 feat!`）
+
+`queueId`（`cmd.send_prompt` 的可选字段）、`cmd.drop_queued`、`cmd.get_queue`、
+`ev.queue`（含 `QueueItem`）、出站 `queueSnapshot()` 全部删除。
+1.7.0 / 1.8.0 建的、1.8.1 拆的——同一天里的一建一拆：
+主机侧（`dsh-remote-control` 2.0.9，`011450e`）把 `PromptQueue` 一起删了，
+`send_prompt` 改为直发并如实报失败。手机侧不要再发这三个命令、
+不要再读 `ev.queue`；需要"排队可见"请等新的方案，不要按 1.7.0 / 1.8.0 的形状自己拼。
+
+### 变更（调用方注意）：`ev.model` 的 `sessionId` 改为必填（`0badb4b`）
+
+模型是**按会话**的：以前这个字段根本不存在，手机只能当全局值显示——
+2026-10-05 用户实测，本会话跑 `space-bunny-free`，
+顶栏却显示别的会话切出来的 `muse-spark`。
+现在发送侧 `outbound.model()` 要求 `sessionId`，schema 侧缺了就整帧拒收：
+老主机发来的全局帧手机**宁可丢掉也不显示错的**。
+升级时主机与小程序要一起走，只升一头会出现"模型顶栏短暂空白"
+（新手机等带 `sessionId` 的帧）或"顶栏仍可能串台"（老手机）。
+
+### 修复：`peer-left` 带 `unpaired`（`e5eeb83`）
+
+中继发给主机的 `peer-left` 有两个长得一模一样的触发：手机点"解除配对"
+（此后这个 convId 永远不会回来，主机留着就是幽灵会话）与手机 socket 断线
+（D3 要求会话留着，回前台还要用）。`unpaired: true` = 前者，
+主机把会话一并作废，pill 从"手机离线"回到"未配对"；
+字段可选，老中继不带就按断线处理。
+
+## [1.8.0] - 2026-10-05
+
+### 新增：`cmd.get_queue`——进会话时主动把排队快照拉回来
+
+`ev.queue` 只在状态变化时被动推：手机进一个会话、从后台切回前台、刚重连时，
+主机这边什么变化都没发生，于是没有任何一帧会来，手机上就是空的——
+2026-10-05 用户实测，进会话看不到当前的排队消息。
+纯推送在没有触发点时必然失效，所以补一条主动拉取：
+手机每次进会话 / 回前台发 `cmd.get_queue {cmdId, sessionId}`，主机立刻回当前全量
+（"以 dsh 为准"：主机是唯一真相源，进来时问它要）。
+
+（注：tag `v1.8.0` 落在下一跳 `f94f490 style: prettier` 上，内容就是这一条；
+排队整套在 1.8.1 已随主机队列一起删除，见上。）
+
+## [1.7.0] - 2026-10-05
+
+### 新增：排队双向同步（`queueId` + `cmd.drop_queued` + `ev.queue` 全量快照）
+
+2026-10-05 用户：排队要双向同步、手机要能删。
+
+- `cmd.send_prompt` 多一个可选 `queueId`（手机自己编号，不透明字符串，最长 64，
+主机原样存、原样回、原样拿来删；老手机不带就还是老行为）；
+- `cmd.drop_queued {cmdId, sessionId, queueId}` 删一条还没转发的消息——
+**只能删 `held`**：转发出去的进了 agent 的 inbox，宿主没给删除入口，
+那时回 `ok: false` 并说清"已经在跑了"，不给假成功；
+- `ev.queue {sessionId, items: QueueItem[≤64]}` 全量快照，
+`QueueItem = {queueId, text, images?, files?, state: held|sent|failed, message?}`，
+队列每次变化（入队 / 转发 / 失败 / 删除 / 切会话）都推一次；
+手机不许在本地增删这张表，它是主机状态的镜子。
+
+⚠️ **这一版立了 tag `v1.7.0`，但从未发到 npm**（注册表里没有 1.7.0）：
+要排队能力的直接用 1.8.0；且整套在 1.8.1 已删除（见上），新代码不要再依赖这些名字。
+
+## [1.6.0] - 2026-10-05
+
+### 新增：`cmd.send_prompt` 可带文件附件（`files`，最多 4 个）
+
+用户一句话："文件附件也支持一下"。
+`fileAttachment = {name, mediaType?, data(base64)}`，
+`files` 与 `images` 并列、可选、上限都是 4。
+与图片的三处不同，都是文件这件事本身逼出来的：
+
+1. **没有 mediaType 白名单**——图片能收 `image/jpeg` 字面量是因为相册出来
+必能重编码成 jpeg，文件各有各的格式，主机只记录类型、不解析内容；
+2. **没有魔数校验**——图片有 JPEG 魔数，文件的"魔数"族类太多，
+纪律全落在两侧的条数与体积闸上；
+3. **文件名就是落盘名**（图片会被强改成 `.jpg`）——Agent 认文件靠扩展名，
+收敛仍走 `safeSegment`（手机传来的名字是不可信输入）。
+
+与图片共用同一条体积预算（`MAX_ATTACH_TOTAL_BYTES`）：中继单帧 1MB 是硬上限，
+超了不是"发不出去"而是整帧被掐、socket 1009 断开——超预算挡下并说清，不悄悄砍内容。
+向后兼容：可选字段，未知键 `zod strip`，老手机照旧发得出去。
+
 ## [1.5.0] - 2026-10-05
 
 ### 新增：历史页可以带待办快照（`ev.todo` 进 `historyItem` 联合）
@@ -164,7 +264,15 @@
 - 会话 / 主机 / 命令 id 生成。
 - 跨平台防休眠命令构造器（`caffeinate`、`systemd-inhibit`）。
 
-[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.1.0...HEAD
+[未发布]: https://github.com/providcc/dsh-remote-protocol/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/providcc/dsh-remote-protocol/compare/v1.8.0...v1.8.1
+[1.8.0]: https://github.com/providcc/dsh-remote-protocol/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/providcc/dsh-remote-protocol/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/providcc/dsh-remote-protocol/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/providcc/dsh-remote-protocol/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/providcc/dsh-remote-protocol/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/providcc/dsh-remote-protocol/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/providcc/dsh-remote-protocol/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.1.0
 [1.0.1]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.0.1
 [1.0.0]: https://github.com/providcc/dsh-remote-protocol/releases/tag/v1.0.0
