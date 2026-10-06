@@ -5,6 +5,32 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [1.0.0-rc.1] - 2026-10-06
+
+> **首个开源候选版。** 四仓（wire / 宿主插件 / 中继 / 小程序）从今天起**统一用这一个版本号**；
+> 在它之前的 1.9.0 / 2.0.x / 1.0.6 / 1.1.x 是私有期的编号，不再作为发版口径。
+
+### 修复（本轮逐行审计的产出）
+
+- **密文上限跟着中继预算走**（`MAX_CIPHERTEXT_BYTES` = 中继 1 MiB 预算 − 8 KiB 余量）。
+  原来写死 512 KiB，而手机侧附件闸门是 512 KiB **原始字节**——base64 胀 4/3 再套
+  secretbox 封装，一条合法的四图消息密文约 930 KiB，**被自家 schema 先拒掉**，
+  用户看到的是"图片/文件发不出去"。
+- **`keepDisplay` 的 caffeinate 参数原来是坏的**：`-u` 不接参数，`disk,display` 被当成
+  要 exec 的 utility，而 man page 明写 `-w` 在有 utility 时被忽略——恰好丢掉了
+  "断言寿命绑到宿主 pid"，崩掉的宿主会留下一台永远不睡的机器。
+- `enc-batch` 项数上限 200；`hello.clientMeta` / `token` 长度上限（未认证的日志放大通路）。
+- KDF 入口校验 PSK 形状（宽容 base64 解码在 KDF 路径没有 Poly1305 兜底，一把被改坏的
+  psk 会静默派生出错钥）；nonce 计数器上界（越界静默截断 = nonce 复用）。
+- `formatPairingToken(NaN)` 抛错而不是产出 `000NaN`。
+- `isoOrUndefined` 归一化 + 超大数不再抛（它本是"最后一道防线"）；`isoText` 真的校验时间。
+- 空的提问 / 空的作答拒收（它们都是"看着像答案、其实什么都没答"的形状）。
+- 出站构造器守自己 schema 的约束（`pairReady` 的 ttlMs、`enc` 的密文长度、批量非空）。
+- 配对 URI 解析收紧三条（path 必须是 `/p`、地址必须 ws(s)、psk 必须像 base64），
+  与小程序侧逐字同步——33 组向量对拍锁住这件事。
+
+判据：93 → **106** 条（新增的都在旧代码上验过会红）。
+
 ## [1.9.0] - 2026-10-06
 
 ### 新增：`cmd.get_pending`——手机主动拉还挂着的审批/提问
