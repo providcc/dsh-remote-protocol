@@ -9,6 +9,7 @@ import {
   PAYLOAD_TYPES,
   SESSION_STATES,
   cmdAnswer,
+  cmdGetPending,
   cmdPayload,
   cmdKeepAwake,
   cmdNewSession,
@@ -22,7 +23,7 @@ import {
   evCompaction,
 } from '../../src/wire/payloads.js'
 
-test('八个命令逐个通过；t 拼错的载荷必须被拒（不认识的命令不能当命令执行）', () => {
+test('九个命令逐个通过；t 拼错的载荷必须被拒（不认识的命令不能当命令执行）', () => {
   assert.ok(parseCmdPayload({ t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 'ses_1', text: '只回复 ok' }))
   assert.ok(parseCmdPayload({ t: 'cmd.list_sessions', cmdId: 'c2' }))
   assert.ok(parseCmdPayload({ t: 'cmd.interrupt', cmdId: 'c3', sessionId: 'ses_1' }))
@@ -47,6 +48,8 @@ test('八个命令逐个通过；t 拼错的载荷必须被拒（不认识的命
   assert.ok(parseCmdPayload({ t: 'cmd.keep_awake', cmdId: 'c6', enabled: true }))
   assert.ok(parseCmdPayload({ t: 'cmd.session_history', cmdId: 'c7', sessionId: 'ses_1' }))
   assert.ok(parseCmdPayload({ t: 'cmd.new_session', cmdId: 'c8' }))
+  assert.ok(parseCmdPayload({ t: 'cmd.get_pending', cmdId: 'c9' }))
+  assert.ok(parseCmdPayload({ t: 'cmd.get_pending', cmdId: 'c9', sessionId: 'ses_1' }))
   assert.equal(parseCmdPayload({ t: 'cmd.send_promt', cmdId: 'c1', sessionId: 's', text: '' }), null)
   assert.equal(parseCmdPayload({ t: 'cmd.subscribe', cmdId: 'c1' }), null, '已删除的 no-op 命令不再被认')
 })
@@ -61,6 +64,14 @@ test('cmd.new_session：只带 cmdId，命名与 id 都归主机', () => {
   const stripped = cmdNewSession.parse({ t: 'cmd.new_session', cmdId: 'c', sessionId: 'ses_x', title: '我编的名字' })
   assert.equal('sessionId' in stripped, false)
   assert.equal('title' in stripped, false)
+})
+
+test('cmd.get_pending：sessionId 可省（省 = 全重发），cmdId 空的不收', () => {
+  assert.ok(cmdGetPending.safeParse({ t: 'cmd.get_pending', cmdId: 'c' }).success)
+  assert.ok(cmdGetPending.safeParse({ t: 'cmd.get_pending', cmdId: 'c', sessionId: 's' }).success)
+  assert.equal(cmdGetPending.safeParse({ t: 'cmd.get_pending', cmdId: '' }).success, false)
+  assert.equal(cmdGetPending.safeParse({ t: 'cmd.get_pending' }).success, false)
+  assert.equal(cmdGetPending.safeParse({ t: 'cmd.get_pending', cmdId: 'c', sessionId: '' }).success, false)
 })
 
 test('session_history：beforeSeq/limit 都可省（省 = 要最新一页），limit 上界 200', () => {

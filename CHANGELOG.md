@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [1.9.0] - 2026-10-06
+
+### 新增：`cmd.get_pending`——手机主动拉还挂着的审批/提问
+
+审批/提问卡是"一次性"的一帧：手机退后台、断线、停在列表页时错过就没了。
+`peer-joined` 的重发（control 2.0.12）只发生在重配对；普通 socket 重连中继不通知
+主机，主机收不到任何信号。于是手机在（重）连上、进会话页时主动拉一次：
+主机把 `pending` 里还挂着的按原请求帧重发（同一 `requestId`），没有只回
+`ev.result{ok:true}`。`sessionId` 可选（带了只重发那条会话的）。
+
+向后兼容：老主机不认这条命令（schema 丢弃），手机 fire-and-forget，不做 waiter、
+不弹错——先发 wire，再发 control，顺序不能反。
+
 ## [1.8.1] - 2026-10-06
 
 ### 新增：`ev.retry` 与 `ev.compaction`——重试 / 压缩中的回合不再看起来像死掉

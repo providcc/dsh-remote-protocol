@@ -373,6 +373,8 @@ export type CmdListSessions = z.infer<typeof cmdListSessions>
 export type CmdKeepAwake = z.infer<typeof cmdKeepAwake>
 /** cmdNewSession 的推导类型。 */
 export type CmdNewSession = z.infer<typeof cmdNewSession>
+/** cmdGetPending 的推导类型。 */
+export type CmdGetPending = z.infer<typeof cmdGetPending>
 
 /**
  * 出站载荷（host → client）。小程序解密后按 `t` 分发，认不出的类型被**静默丢弃**，
@@ -550,7 +552,26 @@ export const cmdSessionHistory = z.object({
 })
 
 /**
- * 手机发来的命令，共 8 种——就是 `mp/core/client.js` 的便捷方法能产出的全部。
+ * 拉取还挂着的审批/提问（手机拉，`pending` 重发）。
+ *
+ * 背景：审批/提问卡是"一次性"的一帧——手机退后台、断线、停在列表页时错过就没了，
+ * 而主机还阻塞着等决定。`peer-joined` 的重发只发生在重配对；
+ * 普通 socket 重连中继不通知主机，主机收不到任何信号。
+ * 于是手机在（重）连上、进会话页时主动拉一次：主机把 `pending` 里还挂着的
+ * 按原请求帧重发（同一 `requestId`，手机按卡覆盖），没有就只回 `ev.result{ok:true}`。
+ *
+ * `sessionId` 可选：带了只重发那条会话的，没有全重发（手机按 sessionId 过滤显示，
+ * 多发不翻倍）。老主机不认这条命令（schema 直接丢弃），手机 fire-and-forget，
+ * 收不到就当没有——不做 waiter、不弹错。
+ */
+export const cmdGetPending = z.object({
+  t: z.literal('cmd.get_pending'),
+  cmdId: nonEmpty,
+  sessionId: nonEmpty.optional(),
+})
+
+/**
+ * 手机发来的命令，共 9 种——就是 `mp/core/client.js` 的便捷方法能产出的全部。
  *
  * 旧实现还有一个 `cmd.subscribe`：它的 handler 只回一个 `ev.result{ok:true}`，
  * `sessionIds`/`includeContent` 没有任何过滤效果，而小程序从不发它。
@@ -565,6 +586,7 @@ export const cmdPayload = z.discriminatedUnion('t', [
   cmdKeepAwake,
   cmdSessionHistory,
   cmdNewSession,
+  cmdGetPending,
 ])
 export type CmdPayload = z.infer<typeof cmdPayload>
 
@@ -590,6 +612,7 @@ export const PAYLOAD_TYPES = {
   cmdKeepAwake: 'cmd.keep_awake',
   cmdSessionHistory: 'cmd.session_history',
   cmdNewSession: 'cmd.new_session',
+  cmdGetPending: 'cmd.get_pending',
   evSessionChanged: 'ev.session_changed',
   evMessageDelta: 'ev.message_delta',
   evToolEvent: 'ev.tool_event',
