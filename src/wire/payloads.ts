@@ -180,6 +180,8 @@ const todoItem = z.object({
 
 /** 待办清单。 */
 export type TodoItem = z.infer<typeof todoItem>
+export type EvCompaction = z.infer<typeof evCompaction>
+export type EvRetry = z.infer<typeof evRetry>
 
 /**
  * 会话当前的待办清单（**全量快照**，与内核 `todo/write` 同语义）。
@@ -187,6 +189,41 @@ export type TodoItem = z.infer<typeof todoItem>
  * 为什么放在顶上一颗常驻条里、默认收起：它是"这一轮在干什么"的索引，不是正文——
  * 混进消息流会和堆栈帧互相踩（用户 2026-10-05 点的就是做在顶部、别和排队消息打架）。
  */
+
+/**
+ * 模型正在重试（host - client，2026-10-06）。
+ *
+ * 真机取证：内核 \`llm/retry\` 的 data 带 retry / maxRetries / failure，
+ * 而插件一直没有映射它——手机上模型卡住时一片空白，用户以为它死了，
+ * 实际是宿主正在重试。这条只带**够拼出人话**的字段：第几次、共几次、什么原因。
+ * \`policyKey\` 那段策略 JSON 对用户毫无意义，不出站。
+ */
+export const evRetry = z.object({
+  t: z.literal('ev.retry'),
+  sessionId: nonEmpty,
+  /** 第几次重试，从 1 起。 */
+  attempt: z.number().int().positive(),
+  /** 一共最多试几次。 */
+  max: z.number().int().positive(),
+  /** 失败原因（TRANSPORT / RATE_LIMIT / TIMEOUT …）。可空：宿主偶尔不带。 */
+  reason: z.string().max(160).optional(),
+})
+
+/**
+ * 上下文压缩的起止（host - client，2026-10-06）。
+ *
+ * \`state='failed'\` 与 \`ended\` 是两件事：前者是“压缩没成”，真机见过
+ * \`summarization produced no text summary content\`。合并成一个 ended 会让用户
+ * 在上下文已经烂掉的情况下以为一切正常。
+ */
+export const evCompaction = z.object({
+  t: z.literal('ev.compaction'),
+  sessionId: nonEmpty,
+  state: z.enum(['started', 'ended', 'failed']),
+  /** 失败原因（仅 state=failed）。 */
+  error: z.string().max(200).optional(),
+})
+
 export const evTodo = z.object({
   t: z.literal('ev.todo'),
   sessionId: nonEmpty.optional(),
@@ -351,6 +388,8 @@ export const evPayload = z.discriminatedUnion('t', [
   evQuestionResolved,
   evRunState,
   evTodo,
+  evRetry,
+  evCompaction,
   evKeepAwakeState,
   evModel,
   evResult,
@@ -560,6 +599,8 @@ export const PAYLOAD_TYPES = {
   evQuestionResolved: 'ev.question_resolved',
   evRunState: 'ev.run_state',
   evTodo: 'ev.todo',
+  evRetry: 'ev.retry',
+  evCompaction: 'ev.compaction',
   evKeepAwakeState: 'ev.keep_awake_state',
   evModel: 'ev.model',
   evResult: 'ev.result',

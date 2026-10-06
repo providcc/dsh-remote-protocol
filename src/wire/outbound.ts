@@ -31,6 +31,8 @@ import {
   type EvSessionChanged,
   type EvTodo,
   type TodoItem,
+  type EvRetry,
+  type EvCompaction,
   type EvSessionHistory,
   type EvToolEvent,
   type HistoryItem,
@@ -185,6 +187,22 @@ export function runState(args: { state: 'running' | 'idle'; detail?: string; ses
  * 待办清单（全量快照）。内核每次 `todo/write` 都给整份，所以这里也只发整份——
  * 增量（增删改某一条）在协议里没有形状，手机也不需要理解"改了哪条"。
  */
+/**
+ * 模型重试。attempt/max/reason 三件套是''手机唯一用得上的''（见 payloads 里的注）。
+ */
+export function retryNotice(args: { sessionId: string; attempt: number; max: number; reason?: string }): EvRetry {
+  return { t: PAYLOAD_TYPES.evRetry, ...args }
+}
+
+/** 上下文压缩起止。state 三态别合并（failed 与 ended 对用户是两件事）。 */
+export function compactionNotice(args: {
+  sessionId: string
+  state: 'started' | 'ended' | 'failed'
+  error?: string
+}): EvCompaction {
+  return { t: PAYLOAD_TYPES.evCompaction, ...args }
+}
+
 export function todoList(args: { todos: TodoItem[]; sessionId?: string }): EvTodo {
   return { t: PAYLOAD_TYPES.evTodo, ...args }
 }

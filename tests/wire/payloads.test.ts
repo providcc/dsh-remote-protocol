@@ -18,6 +18,8 @@ import {
   isoOrUndefined,
   parseCmdPayload,
   parseEvPayload,
+  evRetry,
+  evCompaction,
 } from '../../src/wire/payloads.js'
 
 test('八个命令逐个通过；t 拼错的载荷必须被拒（不认识的命令不能当命令执行）', () => {
@@ -394,5 +396,40 @@ test('send_prompt 的 files：可选、保留扩展名、上限 4 个（图片�
       images: [{ name: 'a.jpg', mediaType: 'image/jpeg', data: 'SlBFR0JZVEVT' }],
       files: [one],
     }).success,
+  )
+})
+/**
+ * 重试与压缩这两条载荷（2026-10-06）。
+ *
+ * 判据钉的是三件容易做错的事：
+ *   1. attempt/max 必填且为正整数 —— 手机要拼「第 N 次 / 共 M 次」，缺一个就拼不出话；
+ *   2. reason 可空 —— 宿主偶尔不带 failure，带空串会渲染出「因为：」这种半截话；
+ *   3. compaction 的 failed 与 ended **不许合并** —— 真机见过压缩失败
+ *      （`summarization produced no text summary content`），合并后用户会在
+ *      上下文已经烂掉时以为一切正常。
+ */
+test('ev.retry：attempt/max 必填，reason 可空', () => {
+  assert.ok(evRetry.safeParse({ t: 'ev.retry', sessionId: 's1', attempt: 1, max: 5 }).success)
+  assert.ok(evRetry.safeParse({ t: 'ev.retry', sessionId: 's1', attempt: 1, max: 5, reason: 'TRANSPORT' }).success)
+  assert.ok(
+    !evRetry.safeParse({ t: 'ev.retry', sessionId: 's1', attempt: 1 }).success,
+    '少了 max：手机拼不出「第几次 / 共几次」',
+  )
+  assert.ok(
+    !evRetry.safeParse({ t: 'ev.retry', sessionId: '', attempt: 1, max: 5 }).success,
+    '空 sessionId 也放行：这一帧会落到哪条会话说不清',
+  )
+})
+
+test('ev.compaction：failed 与 ended 是两件事，合并就分不出来了', () => {
+  for (const st of ['started', 'ended', 'failed']) {
+    assert.ok(
+      evCompaction.safeParse({ t: 'ev.compaction', sessionId: 's1', state: st }).success,
+      `state=${st} 应该合法`,
+    )
+  }
+  assert.ok(
+    !evCompaction.safeParse({ t: 'ev.compaction', sessionId: 's1', state: 'whatever' }).success,
+    '未知 state 被放行：主机发错了我们照单全收，手机上显示成一个不存在的状态',
   )
 })
