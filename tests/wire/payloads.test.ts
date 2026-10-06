@@ -68,6 +68,34 @@ test('cmd.new_session：只带 cmdId，命名与 id 都归主机', () => {
   assert.equal('title' in stripped, false)
 })
 
+test('cmd.new_session 的 workspace 是**可选**的目录，缺省仍合法（向后兼容的两端都不受影响）', () => {
+  // 2026-10-06 用户报"在 dsh 的工作区为未分组"：主机推断不出来时，手机可以明说落在哪。
+  // 可选是硬要求——老手机不发（走主机自己的推断）、老主机 strip 掉（行为与今天完全一样），
+  // 任何一个方向发版都不会把对方钉死。
+  assert.ok(cmdNewSession.safeParse({ t: 'cmd.new_session', cmdId: 'c' }).success, '缺省必须仍合法')
+  assert.ok(
+    cmdNewSession.safeParse({ t: 'cmd.new_session', cmdId: 'c', workspace: '/Users/linbin/dsh-remote-control' })
+      .success,
+  )
+  // 逐字保留：手机那边就是从 ev.session_changed 的 workspace 原样取出来的，
+  // 任何"归一化"都会让两端对不上（与 SessionSummary.workspace 是同一个字符串）。
+  assert.equal(
+    cmdNewSession.parse({ t: 'cmd.new_session', cmdId: 'c', workspace: '/w/a b/项目' }).workspace,
+    '/w/a b/项目',
+  )
+  // 空串 = "我没什么意见"（走主机兜底），不是一条非法的路径。
+  assert.equal(cmdNewSession.parse({ t: 'cmd.new_session', cmdId: 'c', workspace: '' }).workspace, '')
+  // 上限：它是不可信输入，不能因为"一条特别长的路径"把主机侧的内存/日志撑大。
+  assert.equal(
+    cmdNewSession.safeParse({ t: 'cmd.new_session', cmdId: 'c', workspace: '/w/' + 'x'.repeat(1024) }).success,
+    false,
+  )
+  assert.equal(
+    cmdNewSession.safeParse({ t: 'cmd.new_session', cmdId: 'c', workspace: '/w/' + 'x'.repeat(1000) }).success,
+    true,
+  )
+})
+
 test('cmd.get_pending：sessionId 可省（省 = 全重发），cmdId 空的不收', () => {
   assert.ok(cmdGetPending.safeParse({ t: 'cmd.get_pending', cmdId: 'c' }).success)
   assert.ok(cmdGetPending.safeParse({ t: 'cmd.get_pending', cmdId: 'c', sessionId: 's' }).success)

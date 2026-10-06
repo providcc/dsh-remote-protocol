@@ -534,9 +534,30 @@ export const cmdListSessions = z.object({
  * （失败时手机要能说出原因），`data.sessionId` 带上新会话的 id。
  * 为这一件事新立一个 `ev.*` 载荷不值得——那会让"结果回执"有两条并行的路。
  */
+/**
+ * 手机请求新建一条会话，并**可以指明落在哪个工作区**（可选）。
+ *
+ * ## 为什么加这个字段（2026-10-06 用户报："在 dsh 的工作区为未分组"）
+ *
+ * DSH 的会话列表按项目目录分组。不带 cwd 创建时，内核退到宿主进程的默认目录（真机上是 `/`），
+ * 于是那条会话落进**未分组**——手机侧照常能用（它按 id 过滤，不看分组），
+ * 但用户在电脑前看到的是"新建了却不知道在哪"，只能靠未分组那一堆自己找。
+ *
+ * ## 为什么是"可选"而不是必填
+ *
+ * 沿用 `images` / `files` 那条已定的规矩（见 `cmdSendPrompt`）：zod 默认 strip 未知键，
+ * 所以**新手机 + 老主机**（老主机不认这个字段，等于沿用它原来的推断）与
+ * **老手机 + 新主机**（不发这个字段，主机走它自己的兜底）都照旧工作。
+ * 一个可选字段不值得升协议版本——升了会让"两端版本必须配对"从建议变成硬要求。
+ *
+ * 取值是**目录绝对路径**（`/Users/linbin/dsh-remote-control`），与 `SessionSummary.workspace`
+ * 同一个字符串——手机那边本来就是从会话列表里原样取出来的，不做换算，也就不存在两侧对不上的可能。
+ */
 export const cmdNewSession = z.object({
   t: z.literal('cmd.new_session'),
   cmdId: nonEmpty,
+  /** 期望落进的工作区目录。缺省 = 由主机自己推断（配置 → 最近活动的会话 → 宿主默认）。 */
+  workspace: z.string().max(1024).optional(),
 })
 
 export const cmdKeepAwake = z.object({
