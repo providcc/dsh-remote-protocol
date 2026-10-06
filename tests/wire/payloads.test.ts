@@ -21,6 +21,8 @@ import {
   parseEvPayload,
   evRetry,
   evCompaction,
+  evQuestionRequest,
+  evSessionChanged,
 } from '../../src/wire/payloads.js'
 
 test('九个命令逐个通过；t 拼错的载荷必须被拒（不认识的命令不能当命令执行）', () => {
@@ -442,5 +444,40 @@ test('ev.compaction：failed 与 ended 是两件事，合并就分不出来了',
   assert.ok(
     !evCompaction.safeParse({ t: 'ev.compaction', sessionId: 's1', state: 'whatever' }).success,
     '未知 state 被放行：主机发错了我们照单全收，手机上显示成一个不存在的状态',
+  )
+})
+
+// ── 2026-10-06 审计补的三条 ────────────────────────────────────────────
+
+test('isoOrUndefined：认得的时间串要归一化成 ISO，超大数不许抛', () => {
+  assert.equal(isoOrUndefined('2026-10-06T12:00:00.000Z'), '2026-10-06T12:00:00.000Z')
+  // 非 ISO 写法原来原样下发，而契约写的是"只接受 ISO"。
+  assert.equal(isoOrUndefined('2026/10/06 12:00:00'), new Date(Date.parse('2026/10/06 12:00:00')).toISOString())
+  assert.equal(isoOrUndefined('认不出来的'), undefined)
+  assert.equal(isoOrUndefined(1_700_000_000_000), new Date(1_700_000_000_000).toISOString())
+  // 这段是"最后一道防线"：抛出去会顺着 status/session 列表带崩调用方。
+  assert.equal(isoOrUndefined(1e300), undefined)
+  assert.equal(isoOrUndefined(-1e300), undefined)
+  assert.equal(isoOrUndefined(Number.NaN), undefined)
+  assert.equal(isoOrUndefined(undefined), undefined)
+})
+
+test('会话摘要的 updatedAt 只收能被 Date.parse 认出来串（坏串不再放行到手机）', () => {
+  assert.ok(
+    evSessionChanged.safeParse({ t: 'ev.session_changed', sessions: [{ id: 's1', updatedAt: '2026-10-06T00:00:00Z' }] })
+      .success,
+  )
+  assert.equal(
+    evSessionChanged.safeParse({ t: 'ev.session_changed', sessions: [{ id: 's1', updatedAt: '???' }] }).success,
+    false,
+    '放行坏串 → 手机 Date.parse 得 NaN → 时间角标静默坏掉，谁都不报错',
+  )
+})
+
+test('空的提问与空的作答都不合法：它们都是"看着像答案、其实什么都没答"的形状', () => {
+  assert.equal(evQuestionRequest.safeParse({ t: 'ev.question_request', requestId: 'r1', questions: [] }).success, false)
+  assert.equal(
+    cmdAnswer.safeParse({ t: 'cmd.answer', cmdId: 'c', sessionId: 's', requestId: 'r', answers: [] }).success,
+    false,
   )
 })

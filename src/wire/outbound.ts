@@ -15,13 +15,12 @@
  * 这样 F4（必发帧的必填项）、F11（禁止字段）、F3（sessionId 逐字不变）
  * 才从"文档要求"变成"跑一下就红"。
  */
-import type { ClientMeta, ErrorCode } from './frames.js'
+import { MAX_CIPHERTEXT_BYTES, type ErrorCode } from './frames.js'
 import {
   type ChoiceOption,
   type EvKeepAwakeState,
   type EvMessageDelta,
   type EvModel,
-  type EvPayload,
   type EvPermissionRequest,
   type EvPermissionResolved,
   type EvQuestionRequest,
@@ -57,8 +56,13 @@ export function helloOkForHost(hostId: string, protocol?: number): RelayOutbound
   return { t: 'hello-ok', role: 'host', hostId, ...(protocol === undefined ? {} : { protocol }) }
 }
 
+/** 服务端权威 TTL。**ttlMs 必须是正整数**：主机要靠它改写本地过期时间（旧实现的第一起事故）。 */
 export function pairReady(pairingToken: string, ttlMs: number): RelayOutbound {
-  // ttlMs 必须是正整数：主机要靠它改写本地过期时间（旧实现的第一起事故）。
+  // 构造器守自己 schema 的那条约束（2026-10-06 审计）：schema 是 `positive()`，
+  // 而这里原来只管把值塞进去 —— 造出一张对侧会静默丢掉的帧，比抛错难查得多。
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new Error(`pair-ready 的 ttlMs 必须是正整数，收到 ${String(ttlMs)}`)
+  }
   return { t: 'pair-ready', pairingToken, ttlMs }
 }
 
@@ -95,10 +99,21 @@ export function pong(ts?: number): RelayOutbound {
 
 /** 数据面：`sessionId` 逐字来自入帧或配对结果，这里不做任何加工（F3）。 */
 export function encToClient(sessionId: string, seq: number, ciphertext: string): RelayOutbound {
+  // 与 schema 同源的守门（2026-10-06 审计）：超过上限的密文会让对侧静默丢帧，
+  // 而中继在转发前只按字符集把关、不看长度 —— 现象是"发出去没回音"。
+  if (ciphertext.length > MAX_CIPHERTEXT_BYTES) {
+    throw new Error(`密文 ${ciphertext.length} 字节超过上限 ${MAX_CIPHERTEXT_BYTES}`)
+  }
   return { t: 'enc', sessionId, seq, ciphertext }
 }
 
 export function encBatchToClient(sessionId: string, items: Array<{ seq: number; ciphertext: string }>): RelayOutbound {
+  if (items.length === 0) throw new Error('enc-batch 至少要带一项')
+  for (const item of items) {
+    if (item.ciphertext.length > MAX_CIPHERTEXT_BYTES) {
+      throw new Error(`密文 ${item.ciphertext.length} 字节超过上限 ${MAX_CIPHERTEXT_BYTES}`)
+    }
+  }
   return { t: 'enc-batch', sessionId, items }
 }
 
@@ -187,8 +202,15 @@ export function runState(args: { state: 'running' | 'idle'; detail?: string; ses
  * 待办清单（全量快照）。内核每次 `todo/write` 都给整份，所以这里也只发整份——
  * 增量（增删改某一条）在协议里没有形状，手机也不需要理解"改了哪条"。
  */
+export function todoList(args: { todos: TodoItem[]; sessionId?: string }): EvTodo {
+  return { t: PAYLOAD_TYPES.evTodo, ...args }
+}
+
 /**
- * 模型重试。attempt/max/reason 三件套是''手机唯一用得上的''（见 payloads 里的注）。
+ * 模型重试。attempt/max/reason 三件套是**手机唯一用得上**的（见 payloads 里的注）。
+ *
+ * 为什么是这个形状：内核 `llm/retry` 的 data 里还有 policyKey 那段策略 JSON，
+ * 对用户毫无意义，不出站；手机要拼的是"正在重试 2/5 · TRANSPORT"。
  */
 export function retryNotice(args: { sessionId: string; attempt: number; max: number; reason?: string }): EvRetry {
   return { t: PAYLOAD_TYPES.evRetry, ...args }
@@ -201,10 +223,6 @@ export function compactionNotice(args: {
   error?: string
 }): EvCompaction {
   return { t: PAYLOAD_TYPES.evCompaction, ...args }
-}
-
-export function todoList(args: { todos: TodoItem[]; sessionId?: string }): EvTodo {
-  return { t: PAYLOAD_TYPES.evTodo, ...args }
 }
 
 /**

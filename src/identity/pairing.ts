@@ -47,8 +47,14 @@ export function randomPairingToken(): string {
   return formatPairingToken(n % 1_000_000)
 }
 
-/** 把整数摆成 6 位数字码。 */
+/**
+ * 把整数摆成 6 位数字码。
+ *
+ * 非有限值（NaN / Infinity）**抛错**而不是返回 `'000NaN'`（2026-10-06 审计）：
+ * 那个返回值不是 6 位数字码，扫进去永远配不上，而调用方以为拿到了一张合法的码。
+ */
 export function formatPairingToken(n: number): string {
+  if (!Number.isFinite(n)) throw new Error(`配对码必须来自有限数，收到 ${String(n)}`)
   return String(Math.abs(Math.trunc(n)) % 1_000_000).padStart(6, '0')
 }
 

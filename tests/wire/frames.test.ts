@@ -8,6 +8,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  MAX_CIPHERTEXT_BYTES,
+  MAX_RELAY_MESSAGE_BYTES,
   PROTOCOL_VERSION,
   base64Text,
   encBatchFrame,
@@ -83,7 +85,8 @@ test('ciphertext 分两层把关：形状层只要求非空字符串，字符集
   assert.equal(parseEndpointFrame({ ...base, ciphertext: '' }), null)
   assert.equal(parseEndpointFrame(base), null)
   assert.equal(parseEndpointFrame({ ...base, ciphertext: 42 }), null)
-  assert.equal(parseEndpointFrame({ ...base, ciphertext: 'A'.repeat(600 * 1024) }), null)
+  // 上限跟着中继预算走（2026-10-06）：所以"超长"要按那个数取，不是按一个过时的 512 KiB。
+  assert.equal(parseEndpointFrame({ ...base, ciphertext: 'A'.repeat(MAX_CIPHERTEXT_BYTES + 1) }), null)
 })
 
 test('seq 只当元数据：非负整数可以任意起点，负数与小拒', () => {
@@ -158,4 +161,52 @@ test('resync：主机声明它仍持有密钥的会话（复核 R1 的协议入�
 
 test('错误消息长度有界（一条失控的 message 不该占满内存）', () => {
   assert.equal(errorFrame.safeParse({ t: 'error', code: 'internal', message: 'x'.repeat(600) }).success, false)
+})
+
+// ── 帧预算：合法帧必须过得去（2026-10-06 审计）──────────────────────────
+//
+// 原来这里只有"超长要拒"，没有"合法帧必须过"。于是密文上限 512 KiB 与中继
+// 1 MiB 预算、手机 512 KiB 原始附件的三边关系没人对账，真实的用户故障是：
+// 手机选一张合法大小的图 → 密文约 930 KiB → **自家 schema 先拒** →
+// 中继回 unknown_frame → 用户看到"图片发不出去"。
+
+test('密文上限跟着中继预算走：手机闸门内最大的附件必须过得去', () => {
+  // 手机侧 MAX_ATTACH_TOTAL_BYTES = 512 KiB **原始字节**（mp chat.js），
+  // base64 胀 4/3 之后再套一层 secretbox 记录（nonce 24 + MAC 16）并整体 base64。
+  const rawBytes = 512 * 1024
+  const payloadBytes = Math.ceil(rawBytes / 3) * 4
+  const recordBytes = payloadBytes + 24 + 16
+  const ciphertextBytes = Math.ceil(recordBytes / 3) * 4
+  const ciphertext = 'A'.repeat(ciphertextBytes)
+  assert.ok(
+    parseEndpointFrame({ t: 'enc', sessionId: 'c_a1b2c3d4e5f6', seq: 1, ciphertext }),
+    `密文 ${ciphertextBytes} 字节的合法帧被自家 schema 拒了——手机闸门内的附件发不出去`,
+  )
+  assert.ok(ciphertextBytes + 128 < MAX_RELAY_MESSAGE_BYTES, '这个上界必须留在中继单帧预算之内，否则会以 1009 断连')
+  // 再大就该拒：信封加不进去的时候必须由 schema 先说话。
+  assert.equal(
+    parseEndpointFrame({ t: 'enc', sessionId: 'c_a1b2c3d4e5f6', ciphertext: 'A'.repeat(MAX_CIPHERTEXT_BYTES + 1) }),
+    null,
+  )
+})
+
+test('批量帧有项数上限：不能靠"塞很多项"绕过单帧预算', () => {
+  const items = Array.from({ length: 201 }, () => ({ ciphertext: CIPHER }))
+  assert.equal(encBatchFrame.safeParse({ t: 'enc-batch', sessionId: 'c_x', items }).success, false)
+  assert.ok(encBatchFrame.safeParse({ t: 'enc-batch', sessionId: 'c_x', items: items.slice(0, 200) }).success)
+  assert.equal(encBatchFrame.safeParse({ t: 'enc-batch', sessionId: 'c_x', items: [] }).success, false)
+})
+
+test('hello 的 clientMeta 与 token 有长度上限：未认证输入不许放大日志', () => {
+  const long = 'x'.repeat(400 * 1024)
+  assert.equal(
+    parseEndpointFrame({ t: 'hello', role: 'client', clientMeta: { platform: long } }),
+    null,
+    '这两个字段会被中继逐字写进日志，没有上限就是一条未认证的日志放大通路',
+  )
+  assert.ok(
+    parseEndpointFrame({ t: 'hello', role: 'client', clientMeta: { platform: 'wechat-mp', label: '微信小程序' } }),
+  )
+  assert.equal(parseEndpointFrame({ t: 'hello', role: 'host', token: 'x'.repeat(513) }), null)
+  assert.ok(parseEndpointFrame({ t: 'hello', role: 'host', token: 'x'.repeat(512) }))
 })

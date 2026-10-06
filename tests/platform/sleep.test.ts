@@ -15,11 +15,27 @@ test('macOS：默认用 -i -s -w <pid>，不带动 sudo，不绑屏幕', () => {
   })
 })
 
-test('macOS：keepDisplay 走 -d/-u 分支（保持旧语义，未实测，不顺手"修正"）', () => {
-  assert.deepEqual(buildSleepCommand('darwin', 4321, true), {
-    command: '/usr/bin/caffeinate',
-    args: ['-d', '-i', '-u', 'disk,display', '-w', '4321'],
-  })
+test('macOS：keepDisplay 用 -d/-i/-m/-s/-w <pid>，参数里不许出现"被当成命令"的 token', () => {
+  // 2026-10-06 审计：这里原来是 `['-d','-i','-u','disk,display','-w',pid]`——坏的。
+  // `-u` 不接参数，`disk,display` 会被 caffeinate 当成要 exec 的 utility，
+  // 而 man page 明写 `-w` 在有 utility 时被忽略：**恰好丢掉了"寿命绑到宿主 pid"**，
+  // 崩掉的宿主会留下一台永远不睡的机器。这条判据以 man page 的语义为 oracle：
+  // caffeinate 的开关（-d/-i/-m/-s/-u）都不带值，唯一带值的是 -t 与 -w。
+  const cmd = buildSleepCommand('darwin', 4321, true)
+  assert.ok(cmd)
+  assert.deepEqual(cmd.args, ['-d', '-i', '-m', '-s', '-w', '4321'])
+  assert.equal(cmd.args[cmd.args.length - 1], '4321', '-w 必须带 pid 且在最末')
+  assert.ok(cmd.args.includes('-d'), 'keepDisplay 必须真的有 -d，否则屏幕照黑')
+  // 任何"上一个 token 不是 -t/-w、自己又不是选项"的孤立参数，都会被当成 utility。
+  const optionTakers = new Set(['-t', '-w'])
+  for (let i = 0; i < cmd.args.length; i += 1) {
+    const arg = cmd.args[i]!
+    if (optionTakers.has(arg)) {
+      i += 1
+      continue
+    }
+    assert.match(arg, /^-[a-z]+$/, `${arg} 不是 caffeinate 选项，会被当成要 exec 的命令（-w 随之失效）`)
+  }
 })
 
 test('Linux：--what=idle:sleep 与 --mode=block 缺一不可，末尾必须是 sleep infinity', () => {

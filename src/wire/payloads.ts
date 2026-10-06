@@ -36,7 +36,18 @@ export const SESSION_STATES = [
 ] as const
 
 const nonEmpty = z.string().min(1)
-const isoText = z.string()
+
+/**
+ * 「只接受 ISO 字符串」的校验器。
+ *
+ * 为什么不能是裸 `z.string()`（2026-10-06 审计）：注释写着"只接受 ISO"，而 schema
+ * 放行任意字符串，于是 `updatedAt: '???'` 这种帧一路走到手机——手机对它调
+ * `Date.parse` 得到 NaN、时间角标显示成空白或 `Invalid Date`，而**谁都没报错**。
+ * 这里要求能被 `Date.parse` 认出来（数字时间戳仍由生产侧的 `isoOrUndefined()` 折）。
+ */
+const isoText = z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
+  message: '必须是能被 Date.parse 认出来的时间字符串',
+})
 
 const sessionSummary = z.object({
   /** 必填且稳定：小程序拿它做 `wx:key`、跳页参数、标题兜底。 */
@@ -136,7 +147,8 @@ export const evQuestionRequest = z.object({
   t: z.literal('ev.question_request'),
   sessionId: nonEmpty.optional(),
   requestId: nonEmpty,
-  questions: z.array(questionItem),
+  /** 至少一道题：空数组在手机上是一张只有输入框的卡，与"有选项但都不可选"长得一样。 */
+  questions: z.array(questionItem).min(1),
   /**
    * 这张提问卡什么时候作废（ISO 字符串）。
    *
@@ -482,7 +494,11 @@ export const cmdAnswer = z.object({
   cmdId: nonEmpty,
   sessionId: nonEmpty,
   requestId: nonEmpty,
-  answers: z.array(answerItem),
+  /**
+   * **至少一条**：空数组是一次"什么都没答"的回答，放行它等于让主机把一个空答案
+   * 当成真答案交回宿主提问服务（`participate` 那条链只判"有没有值"）。
+   */
+  answers: z.array(answerItem).min(1),
 })
 
 export const cmdResolvePermission = z.object({
@@ -636,10 +652,23 @@ export const PAYLOAD_TYPES = {
  *
  * 为什么不在校验器里管：校验器只管收到的东西对不对；而这里要防的是我们自己
  * 把内核给的**毫秒数**直接塞进去——那是一次"发得出去、对方静默坏掉"的错误。
+ *
+ * 两条 2026-10-06 审计补的纪律：
+ * 1. **字符串要归一化**：`Date.parse` 认得的非 ISO 写法（`2026/10/06`、`Oct 6 2026`）
+ *    原来原样下发，而契约写的是"只接受 ISO"。现在统一折成 `toISOString()`，手机拿到的
+ *    永远是同一种形状。
+ * 2. **超大数不再抛**：`new Date(1e300).toISOString()` 抛 RangeError，而本函数是
+ *    "最后一道防线"，抛出去会顺着 status/session 列表那条路带崩调用方。超范围
+ *    一律当"没有值"（省略字段），与其余失败面一致。
  */
 export function isoOrUndefined(value: unknown): string | undefined {
-  if (typeof value === 'string' && !Number.isNaN(Date.parse(value))) return value
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isNaN(parsed) ? undefined : new Date(parsed).toISOString()
+  }
   if (typeof value === 'number' && Number.isFinite(value)) {
+    // ECMAScript 的时间范围：±8.64e15 毫秒；超出即 Invalid Date。
+    if (Math.abs(value) > 8.64e15) return undefined
     return new Date(value).toISOString()
   }
   return undefined

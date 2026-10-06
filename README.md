@@ -12,6 +12,13 @@
 这是一个**纯函数**库：没有 I/O、没有定时器、没有 `node:child_process`，也不认识任何宿主框架符号。
 因此每条冻结契约都能脱离环境单独被测，中继也能**只 import 类型**——它一个明文字节都不会碰。
 
+> EN: the shared wire protocol for DSH Remote Control — frames, payloads, E2E crypto
+> (`secretbox` via `tweetnacl`) and pairing URIs. Pure functions, no I/O.
+
+上游三仓：[`dsh-remote-control`](https://github.com/providcc/dsh-remote-control)（宿主插件）、
+[`dsh-remote-server`](https://github.com/providcc/dsh-remote-server)（零知识中继）、
+[`dsh-remote-mp`](https://github.com/providcc/dsh-remote-mp)（微信小程序客户端）。
+
 ## 安装
 
 ```sh

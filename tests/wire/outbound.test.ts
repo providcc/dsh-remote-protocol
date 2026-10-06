@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseRelayFrame, relayFrame } from '../../src/wire/frames.js'
+import { MAX_CIPHERTEXT_BYTES, parseRelayFrame, relayFrame } from '../../src/wire/frames.js'
 import { parseEvPayload } from '../../src/wire/payloads.js'
 import {
   encBatchToClient,
@@ -221,4 +221,23 @@ test('sessionHistory：待办条目的 sessionId 不进条目（外层已带，�
   })
   assert.deepEqual(keysOf(page.items[0] ?? {}), ['t', 'todos'])
   assert.notEqual(parseEvPayload(page), null)
+})
+
+// ── 构造器守自己 schema 的约束（2026-10-06 审计）─────────────────────────
+//
+// 这些构造器的存在理由就是"参数表 = 允许出现的字段集合"；而它们原来**不校验值**，
+// 于是能造出对侧解析器会静默丢掉的帧——现象是"发出去、没回音、也不报错"。
+
+test('pairReady：ttlMs 必须正整数（它是主机改写本地过期时间的唯一依据）', () => {
+  assert.deepEqual(pairReady('123456', 90_000), { t: 'pair-ready', pairingToken: '123456', ttlMs: 90_000 })
+  for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => pairReady('123456', bad), `ttlMs=${String(bad)} 不该被接受`)
+  }
+})
+
+test('enc 构造器：超过中继预算的密文当场抛，不发一帧注定被丢的东西', () => {
+  assert.equal(encToClient('c_x', 1, 'AAEC').ciphertext, 'AAEC')
+  assert.throws(() => encToClient('c_x', 1, 'A'.repeat(MAX_CIPHERTEXT_BYTES + 1)))
+  assert.throws(() => encBatchToClient('c_x', []), '空批量帧会被 schema 拒（items 要 min(1)）')
+  assert.doesNotThrow(() => encBatchToClient('c_x', [{ seq: 1, ciphertext: 'AAEC' }]))
 })

@@ -113,3 +113,16 @@ test('配对码：6 位数字、均匀取值空间、归一化只剔空格与连
   assert.equal(normalizePairingToken(' 12-3 4-56 '), '123456')
   assert.equal(normalizePairingToken('12345a6'), '12345a6', '不合法字符不是被剔掉，而是留给上层判失败')
 })
+
+test('formatPairingToken：非有限值抛错，不许产出"000NaN"这种配不上的码', () => {
+  assert.equal(formatPairingToken(0), '000000')
+  assert.equal(formatPairingToken(7), '000007')
+  assert.equal(formatPairingToken(999999.7), '999999')
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.throws(() => formatPairingToken(bad), `配对码不该接受 ${String(bad)}`)
+  }
+})
+
+test('randomPairingToken 恒为 6 位数字（手输面靠它）', () => {
+  for (let i = 0; i < 200; i += 1) assert.match(randomPairingToken(), /^\d{6}$/)
+})

@@ -16,12 +16,14 @@
   "keywords": [
     "dsh",
     "deepseek-harness",
+    "deepseek",
     "remote-control",
     "protocol",
-    "e2ee",
-    "tweetnacl",
-    "x25519",
-    "xsalsa20-poly1305"
+    "websocket",
+    "wechat",
+    "miniprogram",
+    "e2e-encryption",
+    "tweetnacl"
   ],
   "engines": {
     "node": ">=20"

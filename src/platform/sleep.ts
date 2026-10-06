@@ -60,11 +60,20 @@ export function buildSleepCommand(platform: string, ownerPid: number, keepDispla
   }
   switch (platform as SleepPlatform) {
     case 'darwin':
+      /**
+       * `keepDisplay` 分支曾经写成 `['-d','-i','-u','disk,display','-w',pid]`——那是**坏的**
+       * （2026-10-06 审计）：`-u` 不接参数，`disk,display` 会被当成要 exec 的 utility，
+       * 而 man page 明写 `-w` 在有 utility 时被忽略——**恰好丢掉了本模块的卖点**
+       * "断言的寿命绑到宿主 pid"，进程死了机器还被钉着不睡。
+       *
+       * 正确的组合：`-d` 屏幕不休眠、`-i` 空闲不休眠、`-m` 磁盘不休眠、`-s` 接电源时
+       * 系统不休眠、`-w <pid>` 把断言寿命绑到宿主。全部是**开关**（不带值），
+       * 后面只能跟可选的 `-t` / `-w <pid>`；判据里有一条"args 不许出现非选项 token"
+       * 专门盯住这类"把参数当命令"的写法。
+       */
       return {
         command: '/usr/bin/caffeinate',
-        args: keepDisplay
-          ? ['-d', '-i', '-u', 'disk,display', '-w', String(ownerPid)]
-          : ['-i', '-s', '-w', String(ownerPid)],
+        args: keepDisplay ? ['-d', '-i', '-m', '-s', '-w', String(ownerPid)] : ['-i', '-s', '-w', String(ownerPid)],
       }
     case 'linux':
       return {

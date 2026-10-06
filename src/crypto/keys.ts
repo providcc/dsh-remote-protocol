@@ -62,9 +62,23 @@ export function kdfHash(parts: readonly KdfPart[]): Uint8Array {
  *
  * parts 顺序固定为 `[命名空间, 方向, 会话 id, PSK 原始字节]`——
  * PSK 传的是**解码后的字节**，不是 base64 文本（B5）。
+ *
+ * **解码后必须正好 16 字节**（2026-10-06 审计）：`fromBase64` 对非法字符是宽容的
+ * （见 bytes.ts 的"有意的不对称"），而宽容在那条路径上安全是因为后面还有 Poly1305；
+ * KDF 路径**没有**那层兜底——一把被截断的 PSK 会静默派生出一把错钥，用户看到的是
+ * "配对显示成功、每一帧都解不开"。宁可在入口就抛。
  */
 export function derivePskKey(pskBase64: string, direction: Direction, conversationId: string): Uint8Array {
-  return kdfHash([KDF_NAMESPACE, direction, conversationId, fromBase64(pskBase64)])
+  return kdfHash([KDF_NAMESPACE, direction, conversationId, pskBytes(pskBase64)])
+}
+
+/** 解码 PSK 并校验长度；形状不对即抛（见 derivePskKey 的注释）。 */
+export function pskBytes(pskBase64: string): Uint8Array {
+  const bytes = fromBase64(pskBase64)
+  if (bytes.length !== PSK_BYTES) {
+    throw new Error(`配对密钥（PSK）解码后必须是 ${PSK_BYTES} 字节，收到 ${bytes.length} 字节`)
+  }
+  return bytes
 }
 
 /**
@@ -75,7 +89,7 @@ export function derivePskKey(pskBase64: string, direction: Direction, conversati
  * 所以 `(key, nonce)` 组合不可能复用（取证 legacy-spec/mp-client-contract.md §5.2）。
  */
 export function noncePrefix(pskBase64: string, conversationId: string, installId: string): Uint8Array {
-  return kdfHash([NONCE_NAMESPACE, installId, conversationId, fromBase64(pskBase64)]).subarray(0, NONCE_PREFIX_BYTES)
+  return kdfHash([NONCE_NAMESPACE, installId, conversationId, pskBytes(pskBase64)]).subarray(0, NONCE_PREFIX_BYTES)
 }
 
 /**
@@ -91,6 +105,12 @@ export function buildCounterNonce(prefix: Uint8Array, counter: number): Uint8Arr
   }
   if (!Number.isInteger(counter) || counter < 0) {
     throw new Error(`nonce 计数器必须是非负整数，收到 ${String(counter)}`)
+  }
+  // 上界与"非负整数"是同一条纪律（2026-10-06 审计）：越界的数会被 `>>>` 与 `& 0xff`
+  // 悄悄截断，产出**另一个（甚至重复的）nonce**——那是 nonce 复用，不是精度问题。
+  // 8 字节计数器的合法上界是 2^64-1，而 JS 整数只能安全表示到 2^53-1。
+  if (counter > Number.MAX_SAFE_INTEGER) {
+    throw new Error(`nonce 计数器超出安全整数范围，收到 ${String(counter)}`)
   }
   const high = Math.floor(counter / 0x1_0000_0000)
   const low = counter >>> 0

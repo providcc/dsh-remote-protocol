@@ -19,6 +19,7 @@ import {
   generatePsk,
   kdfHash,
   noncePrefix,
+  pskBytes,
   randomNonce,
 } from '../../src/crypto/keys.js'
 import { fromBase64, toBase64, utf8 } from '../../src/crypto/bytes.js'
@@ -133,4 +134,30 @@ test('randomNonce 每次 24 字节且互不相同', () => {
   const seen = new Set<string>()
   for (let i = 0; i < 500; i++) seen.add(hex(randomNonce()))
   assert.equal(seen.size, 500)
+})
+
+// ── 2026-10-06 审计补的边界 ────────────────────────────────────────────
+
+test('PSK 形状不对必须抛：宽容解码只对"还有 MAC 兜底"的那条路成立', () => {
+  const good = generatePsk()
+  assert.equal(pskBytes(good).length, PSK_BYTES)
+  assert.doesNotThrow(() => derivePskKey(good, 'c2h', 'c_a1b2c3d4e5f6'))
+  // 被截断 / 带非 base64 字符 / 空：都会静默派生出另一把钥匙 →
+  // "配对显示成功、每一帧都解不开"，正是 keys.ts 文件头点名的最坏症状。
+  // 注意末尾补字符那条不算坏输入：base64 的 '=' 是 padding，Node 的宽容解码
+  // 遇到 padding 就停，后面的字符被忽略 —— 那条不是形状问题，别写进用例。
+  for (const bad of ['', 'AAAA', good.slice(0, 20), 'not base64 !!!', `AAAA${good}`]) {
+    assert.throws(() => derivePskKey(bad, 'c2h', 'c_a1b2c3d4e5f6'), `PSK ${JSON.stringify(bad)} 不该被接受`)
+    assert.throws(() => noncePrefix(bad, 'c_a1b2c3d4e5f6', 'inst'))
+  }
+})
+
+test('计数器 nonce：越界的数抛错，不静默截断（截断即 nonce 复用）', () => {
+  const prefix = new Uint8Array(NONCE_PREFIX_BYTES)
+  assert.equal(buildCounterNonce(prefix, 0).length, NONCE_BYTES)
+  assert.equal(buildCounterNonce(prefix, 0xffff_ffff).length, NONCE_BYTES)
+  assert.equal(buildCounterNonce(prefix, Number.MAX_SAFE_INTEGER).length, NONCE_BYTES)
+  for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => buildCounterNonce(prefix, bad), `计数器 ${String(bad)} 不该被接受`)
+  }
 })

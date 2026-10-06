@@ -29,6 +29,24 @@ export const PROTOCOL_VERSION = 1
 /** 6 位配对码。位数变了要同时动三处（中继校验、主机生成、小程序归一化），而小程序改不了。 */
 export const PAIRING_TOKEN_RE = /^\d{6}$/
 
+/**
+ * 中继单条 WS 消息的默认预算（`DRC_MAX_MSG_BYTES` 默认 1 MiB）。
+ *
+ * 为什么协议层要写这个数（2026-10-06 审计）：密文上限原本是 512 KiB，
+ * 而手机侧附件闸门是 512 KiB **原始字节**——base64 胀 4/3、再加 secretbox 封装，
+ * 一条合法的四图/一文件消息的密文约 930 KiB，**过不了自己家的 schema**，
+ * 被中继以 `unknown_frame` 丢掉。用户看到的是"图片/文件发不出去"。
+ * 现在两边同源：上限按中继预算倒推，留出信封字段（t/sessionId/seq）的余量。
+ */
+export const MAX_RELAY_MESSAGE_BYTES = 1024 * 1024
+
+/**
+ * 一条密文记录的上限。取 `中继预算 - 8 KiB`：信封 JSON（t/sessionId/seq 与引号）
+ * 远小于 8 KiB，留这个余量是为了让"合法帧必然过得了中继"成为**结构性保证**，
+ * 而不是靠估算。手机侧的附件闸门（512 KiB 原始字节 ≈ 930 KiB 密文）落在它下面。
+ */
+export const MAX_CIPHERTEXT_BYTES = MAX_RELAY_MESSAGE_BYTES - 8 * 1024
+
 const nonEmpty = z.string().min(1)
 const pairingToken = z.string().regex(PAIRING_TOKEN_RE)
 
@@ -46,8 +64,14 @@ export const base64Text = z
   .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
 
 const clientMeta = z.object({
-  platform: z.string().optional(),
-  label: z.string().optional(),
+  /**
+   * 长度上限是**安全要求**，不是洁癖（2026-10-06 审计）：这两个字段会被中继逐字
+   * 写进 info 日志，而中继在认证前就收 `hello`。实测单连接 20 帧、每帧 400 KiB 的
+   * `platform` → 8.19 MB 日志 / 1.2 秒（journald 按条数限流，不按字节）。给它上界，
+   * 加上中继侧对日志值的统一截断，这条放大通路就断了。
+   */
+  platform: z.string().max(128).optional(),
+  label: z.string().max(128).optional(),
 })
 /** 客户端自报的门面信息（小程序发 `{platform:'wechat-mp', label:'微信小程序'}`）。 */
 export type ClientMeta = z.infer<typeof clientMeta>
@@ -59,8 +83,8 @@ export const helloFrame = z.object({
   t: z.literal('hello'),
   role: z.enum(['host', 'client']),
   protocol: z.number().int().positive().optional(),
-  /** host 的出站认证凭据，与中继的 `DRC_HOST_TOKEN` 定时安全比较。 */
-  token: nonEmpty.optional(),
+  /** host 的出站认证凭据，与中继的 `DRC_HOST_TOKEN` 定时安全比较。上限防超长串白占内存。 */
+  token: z.string().min(1).max(512).optional(),
   hostId: nonEmpty.optional(),
   label: z.string().max(128).optional(),
   /** 安装 id，弱随机、非秘密；缺省时由中继分配。上限防一条超长字符串白占内存。 */
@@ -92,10 +116,7 @@ export const encFrame = z.object({
    * 故意分两层：混在 schema 里，中继就没法区分"形状不对（unknown_frame）"与
    * "密文不是合法 base64（bad_frame）"，而这两个错误码对排错的价值完全不同。
    */
-  ciphertext: z
-    .string()
-    .min(1)
-    .max(512 * 1024),
+  ciphertext: z.string().min(1).max(MAX_CIPHERTEXT_BYTES),
 })
 
 export const encBatchFrame = z.object({
@@ -106,13 +127,17 @@ export const encBatchFrame = z.object({
     .array(
       z.object({
         seq: z.number().int().nonnegative().optional(),
-        ciphertext: z
-          .string()
-          .min(1)
-          .max(512 * 1024),
+        ciphertext: z.string().min(1).max(MAX_CIPHERTEXT_BYTES),
       }),
     )
-    .min(1),
+    .min(1)
+    /**
+     * 项数上限（2026-10-06 审计）：没有上限时一条批量帧可以塞进任意多项，
+     * 中继要么在 WS 层按 maxPayload 拒掉、要么先吃满内存再拒。
+     * 取 200：单帧总量仍由中继的 maxPayload 兜底（每项最小也有 nonce+MAC+JSON 开销），
+     * 这个数只是"别让 items 本身变成无界的"。
+     */
+    .max(200),
 })
 
 /** 显式退出某个会话（D3 之后会话会长存，需要一条主动退出的路）。 */
@@ -185,7 +210,8 @@ export const pairedFrame = z.object({
 
 /** 四个 reason 是 UI 分支条件，小程序有逐字的中文映射表（F6）。 */
 // reason 的取值集合是**冻结消费面**的一部分（F6）：小程序 `mp/core/client.js:translatePairFail`
-// 只认这五个键，多一个就把英文字面量弹到用户脸上。中继侧内部原因（rate_limited 之类）
+// 只认这四个键（invalid_or_expired / already_used / host_offline / bad_token），
+// 多一个就把英文字面量弹到用户脸上。中继侧内部原因（rate_limited 之类）
 // 要记进日志，落到线上的 reason 必须是这张表里的一个。
 export const pairFailFrame = z.object({
   t: z.literal('pair-fail'),
