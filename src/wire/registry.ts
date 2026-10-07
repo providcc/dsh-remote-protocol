@@ -6,8 +6,9 @@
  * 注册表本来是"协议知识"，但它曾经散在三处，每一处都要人肉同步：
  *
  * 1. zod 的两个判别联合（`endpointFrame` / `relayFrame`）——形状的事实源；
- * 2. 中继 `src/server.ts:59-76` 的 `KNOWN_FRAME_NAMES`——**手抄**的一份，用来把
+ * 2. 中继 `src/server.ts` 里手抄的 `KNOWN_FRAME_NAMES`——**手抄**的一份，用来把
  *    "帧名不认识"（`unknown_frame`）与"名字对、形状坏"（`bad_frame`）分开；
+ *    （2026-10-07 已删：中继改 import 本文件的 `FRAME_TYPES` / `isKnownFrameType`。）
  * 3. 伞仓 `e2e/wire-surface.test.mjs` 靠正则从 `payloads.ts` 的**源码文本**里
  *    抽 `'ev.xxx'` / `'cmd.xxx'` 字面量。
  *

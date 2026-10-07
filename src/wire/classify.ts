@@ -3,16 +3,18 @@
  *
  * ## 为什么把它从中继里搬回协议层
  *
- * 中继的入站管线（`dsh-remote-server/src/server.ts:634-708`）现在是：
- * 自己写七步、手抄一份 `KNOWN_FRAME_NAMES`（`:59-76`）、手写 `ciphertextsAreBase64`（`:733-736`），
- * 再加上两条配对特例。那份清单是**类型受约束的**（`Set<EndpointFrame['t'] | RelayFrame['t']>`，
- * 拼错一个字母编译不过），但"**删掉或改名**一个帧"不会让它变红——那个帧会悄悄从
+ * 中继的入站管线（`dsh-remote-server/src/server.ts` 的 `ws.on('message')`）此前是：
+ * 自己 `JSON.parse`、手抄一份帧名清单、自己分"名字不认识/名字对但形状坏"、
+ * 手写 `ciphertextsAreBase64`，再加上两条配对特例。那份清单是**类型受约束的**
+ * （`Set<EndpointFrame['t'] | RelayFrame['t']>`，拼错一个字母编译不过），
+ * 但"**删掉或改名**一个帧"不会让它变红——那个帧会悄悄从
  * `unknown_frame` 挪到 `bad_frame`，或者反过来，排错时读到的信息整个变味。
  *
  * 更要命的是**七步的分流是隐式的**：没有一条判据说"第 5 步与第 6 步必须分开"，
  * 而这条纪律的价值只在真出问题的时候才体现（规范 §4.3.2）。
  *
  * 本模块把七步变成一个返回值：调用方只剩"照着 reason 发对应的 error"，策略不再散落。
+ * **2026-10-07 起中继已接上**（`classifyEndpointFrameText`）。
  *
  * ## 判定结果与错误码的对应（调用方 MUST 照此映射）
  *

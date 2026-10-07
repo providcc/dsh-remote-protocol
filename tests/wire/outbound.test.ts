@@ -306,6 +306,56 @@ test('encToRelay 与 encBatchToRelay 与发给 client 的那对一样守密文�
   assert.doesNotThrow(() => encToRelay('c_x', 1, 'AAEC'))
 })
 
+// ── clientId：中继转发时才补上的那个字段（2026-10-07）─────────────────
+//
+// 背景：`clientId` 是协议里唯一一个"两端都不生产、只有中继生产"的字段——
+// 端点发的 enc 不带它（它不知道中继会怎么转发），中继把客户端上行转给主机时
+// 才补上"这是哪台手机"（主机按它做 per-client 回调）。中继因此只能手写字面量，
+// 而手写意味着 sessionId/seq/ciphertext 三个字段名在两处各抄一遍。
+// 参数表补上它之后那条手写路径消失了——所以下面三条判据守的就是这个接线。
+
+test('encToRelay 带 clientId：键集多一个，且过得了 parseEndpointFrame', () => {
+  const bare = encToRelay('c_0123456789ab', 7, 'AAEC')
+  assert.deepEqual(keysOf(bare).sort(), ['ciphertext', 'seq', 'sessionId', 't'])
+  assert.ok(!('clientId' in bare), '缺省时不该有这个键：端点自己发的帧不带它')
+
+  const tagged = encToRelay('c_0123456789ab', 7, 'AAEC', 'inst-1')
+  assert.deepEqual(keysOf(tagged).sort(), ['ciphertext', 'clientId', 'seq', 'sessionId', 't'])
+  // 收窄用 `t === 'enc'` 而不是 `as`：构造器的返回类型是 EndpointFrame 联合，
+  // 而 `assert.ok` 在 @types/node 里是 asserts 函数，能真的把联合收窄掉。
+  assert.ok(tagged.t === 'enc')
+  assert.equal(tagged.clientId, 'inst-1')
+  assert.ok(parseEndpointFrame(tagged), '带 clientId 的帧必须仍然过 schema（它在 encFrame 里是可选字段）')
+})
+
+test('encToRelay 的 seq 可以缺省：缺省即"不发这个键"，不是"发一个 undefined"', () => {
+  // schema 里 seq 是可选的（客户端发来的 enc 可以不带），中继转发时原样透传。
+  // 写成 `seq: undefined` 会被 JSON.stringify 静默丢掉——线上行为一样，
+  // 但源码里那个 undefined 会让人以为"这里总会发一个 seq"。
+  const frame = encToRelay('c_0123456789ab', undefined, 'AAEC', 'inst-1')
+  assert.ok(!('seq' in frame), '键根本不该存在：`in` 才测得出 `seq: undefined` 与没有它的区别')
+  assert.ok(parseEndpointFrame(frame), '不带 seq 的帧必须仍然过 schema')
+})
+
+test('encBatchToRelay 原样透传 items：seq 可缺省，且不补 clientId', () => {
+  // ⚠️ 批量帧**不带** clientId，而单帧带——这不是漏写，是 F 契约：
+  // `encBatchFrame` 的 schema 里压根没有 clientId 字段。加它要改协议。
+  // 这条判据的作用是"哪天有人顺手给它补上，让它变红"。
+  const items: Array<{ seq?: number; ciphertext: string }> = [{ ciphertext: 'AAEC' }, { seq: 4, ciphertext: 'BBBB' }]
+  const frame = encBatchToRelay('c_0123456789ab', items)
+  assert.ok(!('clientId' in frame), '批量帧没有 clientId 这个字段（encBatchFrame 的 schema 里没有）')
+  assert.ok(frame.t === 'enc-batch')
+  const out = frame.items
+  assert.ok(out !== undefined, 'items 至少有一项（构造器已经拒了空数组），这里只是让 TS 收窄')
+  assert.deepEqual(out, items, '转发是原样透传：中继不在上行方向重编号')
+  // 而且必须是**复制**：调用方之后改自己的数组，不该改掉已经造好的帧。
+  const first = items[0]
+  assert.ok(first !== undefined)
+  first.ciphertext = 'ZZZZ'
+  assert.equal((out[0] as { ciphertext: string }).ciphertext, 'AAEC')
+  assert.ok(parseEndpointFrame(frame), '不带 seq 的 items 必须仍然过 schema')
+})
+
 test('resync 的条数上界与 schema 同源：造一条自己收不了的帧是最贵的错误', () => {
   assert.throws(() => resync(Array.from({ length: 2001 }, (_, i) => `c_${i}`)), /2000/)
   assert.doesNotThrow(() => resync([]), '空列表是合法的：主机确实可能一个会话都不剩')

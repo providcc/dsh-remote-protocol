@@ -216,17 +216,49 @@ export function ping(ts?: number): EndpointFrame {
  *
  * 与 `encToClient` 的唯一区别是方向命名，因为两边的**长度守门是同一条**：
  * 超过上限的密文会让对侧静默丢帧，而中继在转发前只看字符集、不看长度。
+ *
+ * ## `clientId` 为什么在这里（2026-10-07 补）
+ *
+ * schema 里的 `clientId` 是**中继转发时补的**：端点自己发的 `enc` 不带它，
+ * 而中继把客户端的上行转给主机时要补上"这是哪台手机"（主机按它做 per-client 回调）。
+ * 于是这个字段是**唯一一个"两端都不生产、只有中继生产"**的字段。
+ *
+ * 原先中继因此只能手写 `{t:'enc',…}` 字面量——那意味着 `sessionId` / `seq` /
+ * `ciphertext` 三个字段名在协议层与中继各写一遍，改字段不会编译失败。
+ * 参数表补上它之后那条手写路径就消失了。
  */
-export function encToRelay(sessionId: string, seq: number, ciphertext: string): EndpointFrame {
+export function encToRelay(
+  sessionId: string,
+  seq: number | undefined,
+  ciphertext: string,
+  clientId?: string,
+): EndpointFrame {
   if (ciphertext.length > MAX_CIPHERTEXT_BYTES) {
     throw new Error(`密文 ${ciphertext.length} 字节超过上限 ${MAX_CIPHERTEXT_BYTES}`)
   }
-  return { t: 'enc', sessionId, seq, ciphertext }
+  // `seq` 缺省即"不发这个字段"：schema 里它是可选的（客户端发来的 enc 可以不带），
+  // 而写成 `seq: undefined` 会被 JSON.stringify 静默丢掉——行为一样，但源码里
+  // 那个 `undefined` 会让人以为"这里总会发一个 seq"。
+  return {
+    t: 'enc',
+    sessionId,
+    ...(seq === undefined ? {} : { seq }),
+    ciphertext,
+    ...(clientId === undefined ? {} : { clientId }),
+  }
 }
 
+/**
+ * 批量帧的**上行**方向：中继把客户端的批量帧原样转给主机。
+ *
+ * 与 `encBatchToClient` 不同，这里的 `seq` 是**可选**的（跟 schema 一致）：
+ * 客户端发来的 items 本来就可能不带 seq，中继在转发这条上行时**不改它**——
+ * 重新编号是中继→客户端方向独有的（`forwardEncBatch` 的下行分支）。
+ * 所以参数表必须容得下 `seq` 缺失，否则中继只能手写字面量绕过它。
+ */
 export function encBatchToRelay(
   sessionId: string,
-  items: ReadonlyArray<{ seq: number; ciphertext: string }>,
+  items: ReadonlyArray<{ seq?: number; ciphertext: string }>,
 ): EndpointFrame {
   if (items.length === 0) throw new Error('enc-batch 至少要带一项')
   for (const item of items) {
