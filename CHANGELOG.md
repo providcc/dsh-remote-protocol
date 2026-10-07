@@ -5,6 +5,69 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，
 本项目遵循 [语义化版本](https://semver.org/spec/v2.0.0.html)。
 
+## [2.0.15] - 2026-10-07
+
+> **协议有了规范。** 本版把散在 README / `DESIGN.md` §2 三张冻结表 / 各文件头注里的
+> 契约，收成一份 [SPEC.md](./SPEC.md)（`dsh-rc/1`，RFC 2119 措辞），
+> 并把其中六类此前只以注释存在的规则变成可执行的代码。
+>
+> **向后兼容**：全部是**加性**的——新增可选字段、新增导出，没有一个既有字段被改名或删除。
+> `capabilities` / `retryAfterMs` / `unsupported_protocol` 缺省即不出现，
+> 老对端 strip 掉它们，行为与 2.0.14 完全一致。
+
+### 新增：`SPEC.md`（规范性文档）
+
+四层契约（传输 / 控制面 / 密码学 / 数据面）、版本与能力协商、交付语义
+（顺序 / 幂等 / 重放 / 离线补拉 / nonce 唯一性）、错误模型、能力与限额上报、
+演进与兼容策略、注册表，外加三份附录（冻结字节级 B1–B9 / 帧 F1–F13 / 传输 T1–T8）。
+
+附录 D 是「规范里有、代码里还没有」的**有序**待办——把它单列而不是散在正文里，
+是因为「规范说了但没做」和「做了但规范没说」必须都能被看见。
+
+### 新增：六个模块（规范的可执行部分）
+
+| 模块 | 替掉了什么 |
+|---|---|
+| `limits` | 三个仓里各写一遍的附件上限 / 帧预算 |
+| `registry` | 中继手抄的帧名清单、伞仓正则抽源码字面量的做法 |
+| `classify` | 中继 `src/server.ts` 里隐式的七步分流 |
+| `errors` | 「这个错误码该怎么办」在三个消费方各自的推断 |
+| `negotiate` | `hello.protocol` 传了但没人校验 |
+| `idempotency` | `cmdId` 不去重（超时重发 = 命令执行两次） |
+
+`classify` 的价值在两处细节：**第 5 步（帧名在不在）与第 6 步（形状对不对）必须分开**，
+以及**两条配对特例要早于 schema 判定**（`pair-begin-client` 形状坏要回
+`pair-fail`，因为小程序只认那四个 reason 的中文映射）。
+
+`registry` 用编译期断言守住「表与 zod 判别联合逐项相等」——
+写这条断言的当天它就抓到了一次真漂移：`relayFrame` 联合里有 `enc` / `enc-batch`
+（它们两个方向都有），而人抄的那张表只有 8 个控制帧名。
+
+### 变更（加性）
+
+- `hello` / `hello-ok` 新增可选 `capabilities: string[]`（长度有上界：`hello` 在认证之前就能收到）。
+- `error` 新增可选 `retryAfterMs`（毫秒）。借鉴 RFC 9110 的 `Retry-After` 的毫秒形态；
+  只有 `rate_limited` / `pair_table_full` 这类「等一等就好」的码才该带它。
+- 错误码新增 `unsupported_protocol`：它是**版本问题**而不是形状问题，
+  唯一该触发的动作是「把版本说清楚」。加它不破坏任何老实现（老 client 走兜底展示），
+  但中继 MUST 同时带一句中文 message。
+- `frames` 仍然转出 `MAX_RELAY_MESSAGE_BYTES` / `MAX_CIPHERTEXT_BYTES`
+  （中继从 `dsh-remote-wire/frames` 引它们；撤掉是一条只会在下游编译期爆炸的变更）。
+
+### 新增：`endpoint → relay` 的出站构造器
+
+`outbound` 此前只有「中继 → 端点」与「host → client 载荷」两段，
+于是**中继唯一会解析的那一组帧**全靠调用方手写字面量——
+而宿主插件正是这么用的（七个帧），只有入站帧过 schema。
+补上 `helloForHost` / `helloForClient` / `pairBegin` / `pairClaim` / `ping` /
+`encToRelay` / `encBatchToRelay` / `sessionLeave` / `resync`，
+返回类型是 `EndpointFrame` 判别联合——参数表上不存在的字段**在类型上就写不出来**。
+
+### 判据
+
+107 → **152** 条。15 次变异全部变红；其中两条改写成**能编译**的形状重跑过一次
+（「变异要能编译，否则测的是上一个产物」）。
+
 ## [1.0.0-rc.1] - 2026-10-06
 
 > **首个开源候选版。** 四仓（wire / 宿主插件 / 中继 / 小程序）从今天起**统一用这一个版本号**；
