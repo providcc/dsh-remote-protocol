@@ -37,7 +37,12 @@ test('版本落在 [最低, 自身] 之内就继续；之外 MUST 说清楚是�
 
   const tooNew = negotiateProtocol(PROTOCOL_VERSION + 1)
   assert.ok(!tooNew.ok && tooNew.reason === 'too_new')
-  assert.match(tooNew.message, /比本端新/)
+  // 只钉**方向**（"本端比对方旧"），不钉整句措辞：这句话会被原样弹到用户手机上，
+  // 而"本端/对方"指的是**读它的那一端**——手机上"本端"就是用户的手机。
+  // 早先写的是 /比本端新/，而那句实际在说"请把本端升级"，于是手机用户读到的是
+  // "请升级我的手机"，而真正该升级的是中继那一侧。措辞一改判据就红，
+  // 说明它钉的是措辞不是意思——把它改成钉意思。
+  assert.match(tooNew.message, new RegExp(`本端协议版本 ${PROTOCOL_VERSION}.*比对方旧`))
 
   // "太旧"只有在本端抬高 min 时才可能出现——本协议最低版本就是 1，
   // 而合法版本号是正整数，所以默认配置下这一档是**不可达**的。

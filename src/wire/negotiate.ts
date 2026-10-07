@@ -73,8 +73,13 @@ function verdictFor(peer: number, own: number, min: number, missing: boolean): V
       ok: false,
       reason: 'too_new',
       peer,
-      message: `对方协议版本 ${peer} 比本端新（${own}）；请把本端升级后再试`,
-    }
+      // ⚠️ 这句话**会被原样弹到用户手机上**（中继 `acceptProtocol` 显式带 message，
+    // 而客户端的处理是 `f.message || f.code`）。所以人称必须从**读它的人**出发：
+    // 收这条错的一端是"对方"，而被要求升级的是它自己 —— 写"请把本端升级"时，
+    // 手机用户读到的是"请升级我的手机"，而真正要升级的是中继/主机那一侧。
+    // 同理"对方"在中继的日志里指的是手机。两个方向都试过，读起来都指错了人。
+    message: `本端协议版本 ${own} 比对方旧（对方为 ${peer}）；请把本端升级到 ${peer} 或更高后再试`,
+  }
   }
   return { ok: true, version: peer, missing }
 }
