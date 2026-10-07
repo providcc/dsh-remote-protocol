@@ -71,8 +71,18 @@ export function paired(sessionId: string, hostId: string): RelayOutbound {
   return { t: 'paired', sessionId, hostId }
 }
 
-export function pairFail(reason: 'invalid_or_expired' | 'already_used' | 'host_offline' | 'bad_token'): RelayOutbound {
-  return { t: 'pair-fail', reason }
+/**
+ * `pair-fail`：**能带 token 就带**（2026-10-07 补）。
+ *
+ * 不带时主机侧只能作废"当前展示的那张"，而多码并存时那会作废错的那张
+ * （详见 `frames.ts` 里 `pairFailFrame.pairingToken` 的注释）。
+ * 缺省即不发这个字段，所以老主机那条路逐字不变。
+ */
+export function pairFail(
+  reason: 'invalid_or_expired' | 'already_used' | 'host_offline' | 'bad_token',
+  pairingToken?: string,
+): RelayOutbound {
+  return { t: 'pair-fail', reason, ...(pairingToken === undefined ? {} : { pairingToken }) }
 }
 
 /** 发给主机的加入通知必须带 pairingToken（主机按它取 PSK）；发给客户端的不带。 */

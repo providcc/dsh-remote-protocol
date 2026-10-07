@@ -377,3 +377,28 @@ test('makeError：retryAfterMs 缺省就不带这个键，带了必须是正整�
   // 但可以让"不带文案"变成一个显眼的选择。
   assert.ok(!('message' in makeError('internal')))
 })
+
+// ── pair-fail 的 pairingToken（2026-10-07 补）─────────────────────────
+//
+// 这个字段是为了解决一个**具体的误伤**：帧原先只有 `reason`，而主机侧的处理是
+// "作废当前展示的那张"——多码并存时它会作废错的那张（屏幕上是有效的码 B，
+// 用户扫了张过期的码 A → B 被丢弃 → B 的 PSK 没了 → 那条通道作废）。
+//
+// 兼容：可选。不带时老主机那条路逐字不变。
+
+test('pairFail 带 token：键集多一个，且过得了 parseRelayFrame', () => {
+  const bare = pairFail('invalid_or_expired')
+  assert.deepEqual(keysOf(bare).sort(), ['reason', 't'], '缺省即不发这个字段：老主机那条路必须逐字不变')
+  const tagged = pairFail('invalid_or_expired', '123456')
+  assert.deepEqual(keysOf(tagged).sort(), ['pairingToken', 'reason', 't'])
+  assert.equal(tagged.pairingToken, '123456')
+  assert.ok(parseRelayFrame(tagged), '带 token 的帧必须仍然过 relay 侧 schema')
+})
+
+test('反向判据：token 上界 16 —— 超长串会让对侧拿它当键去查表', () => {
+  // 不是洁癖：主机侧拿它去 `slots.forget(token)`，而一张几十 KB 的串
+  // 在日志里会占一行、在查表上是 O(len)。6 位码空间，16 已经很宽。
+  assert.equal(parseRelayFrame({ t: 'pair-fail', reason: 'bad_token', pairingToken: '1'.repeat(17) }), null)
+  assert.ok(parseRelayFrame({ t: 'pair-fail', reason: 'bad_token', pairingToken: '1'.repeat(16) }))
+  assert.equal(parseRelayFrame({ t: 'pair-fail', reason: 'bad_token', pairingToken: '' }), null, '空串没有意义')
+})

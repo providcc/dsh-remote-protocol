@@ -210,7 +210,23 @@ export const helloOkFrame = z.object({
 export const pairReadyFrame = z.object({
   t: z.literal('pair-ready'),
   pairingToken,
-  ttlMs: z.number().int().positive(),
+  /**
+   * 服务端权威 TTL。**有上界**（2026-10-07 补）。
+   *
+   * 为什么"正整数"不够：端点拿它算本地过期时刻（`createdAt + ttlMs`），
+   * 而那一步之后会走 `new Date(...).toISOString()` —— Date 的合法范围是
+   * ±8.64e15 ms，一个 `1e17` 的 TTL 让 `toISOString` 抛 `RangeError`。
+   *
+   * 症状特别贵：那一抛发生在宿主侧**构造 status.json 快照**的过程中，而
+   * `shell/status.ts` 的写盘外面包着一个空 catch（"状态入口不许成为崩溃源"）
+   * —— 于是**整个 status.json 从此永久停更**，而 GUI 宿主里那是唯一的排错入口
+   * （`carrier` / `relay` / `problems` 全部冻在启动那一版）。
+   *
+   * 上界取 30 天：真实的配对码 TTL 是秒级到分钟级（中继默认 120 s、
+   * 本机线上 180 s），30 天已经宽到不可能是误配。而它离 Date 的上限
+   * 仍有 11 个数量级，所以这条约束不会在可见的将来变成障碍。
+   */
+  ttlMs: z.number().int().positive().max(30 * 24 * 3600 * 1000),
 })
 
 export const pairedFrame = z.object({
@@ -228,6 +244,26 @@ export const pairedFrame = z.object({
 export const pairFailFrame = z.object({
   t: z.literal('pair-fail'),
   reason: z.enum(['invalid_or_expired', 'already_used', 'host_offline', 'bad_token']),
+  /**
+   **是哪一张码失败的**（2026-10-07 补，加性）。
+   *
+   * ## 为什么必须有它
+   *
+   * 这个帧原先只有 `reason`，而主机侧的处理是"作废**当前展示的那张**"——
+   * 于是它只能拿 `active.pairing` 顶罪。多码并存时那会**作废错的那张**：
+   * 屏幕上是码 B（完全有效），用户扫了一张早就过期的码 A → 中继回
+   * `invalid_or_expired` → 主机把 B 记进 `spentTokens` 并 forget，再补一张 C。
+   *
+   * 症状不是"多扫一次码"：B 的 PSK 被丢弃意味着那条配对通道作废，
+   * 而这正是文件头引用的那起「取错 PSK 全线解不开」事故的前置条件。
+   *
+   * ## 兼容
+   *
+   * **可选**：更老的中继不发它，主机侧必须继续按"当前展示的那张"兜底
+   * （`onPairFail` 的注释里写着这条兜底的原因）。发它的是中继、读它的是主机，
+   * 同一时刻两端版本必然一致——所以"新主机 + 老中继"才是需要兜底的那一侧。
+   */
+  pairingToken: z.string().min(1).max(16).optional(),
 })
 
 export const peerJoinedFrame = z.object({

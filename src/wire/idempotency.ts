@@ -53,6 +53,14 @@ export class IdempotencyLedger {
   private readonly entries = new Map<string, Entry>()
   private readonly windowMs: number
   private readonly capacity: number
+  /**
+   * 上次 `takeEvicted()` 之后被淘汰的键（缓冲在台账里，取走即清）。
+   *
+   * 为什么缓冲在这里而不在调用方扫表：本模块是**有界缓存**的实现方，
+   * 只有它知道淘汰了谁；把"扫谁"这件事交给使用方，就等于让每个使用方各写一遍
+   * O(n) 对齐逻辑（而漏掉一个就等于那张表无界）。见 {@link takeEvicted}。
+   */
+  private evicted: string[] = []
 
   constructor(options: { windowMs?: number; capacity?: number } = {}) {
     this.windowMs = options.windowMs ?? IDEMPOTENCY_WINDOW_MS
@@ -93,6 +101,35 @@ export class IdempotencyLedger {
     return seen !== undefined && now - seen.at < this.windowMs
   }
 
+  /**
+   * 最近一次 `admit` / `prune` / `has` **淘汰掉**的那些 `cmdId`。
+   *
+   * ## 为什么需要这个出口
+   *
+   * 台账自己是**有界**的（窗口 + 容量两路淘汰），而它的使用方往往还并着
+   * 一张按 `cmdId` 索引的表（典型形状：宿主侧缓存每条命令的 `ev.result`，
+   * 好让重发能**重放**上一次那个回执而不是回一句新的）。
+   *
+   * 那张表不会自动跟着收缩：它调 `has(cmdId)` 只能问**自己那一个键**，
+   * 而 `prune` 删的是台账的键。于是"台账稳在 256 条、外挂表长到进程寿命"——
+   * 而症状不是内存涨一点，是每条回执还带着载荷（`cmd.list_sessions` 的回执
+   * 带最多 100 条会话摘要）。
+   *
+   * 遍历整张外挂表来对齐是 O(n) **每条命令**，而 n 正是要解决的问题。
+   * 正确的时机是"台账刚发生过结构性淘汰"时——而那正是这个出口提供的。
+   *
+   * 语义保证：
+   * - 只含**本进程这个台账实例**淘汰掉的键，不含别处；
+   * - 清空（`clear()`）也走这里，所以解配对时外挂表能一起收；
+   * - 无淘汰时是**空数组**（不是 undefined），调用方不必判空。
+   */
+  takeEvicted(): string[] {
+    if (this.evicted.length === 0) return []
+    const out = this.evicted
+    this.evicted = []
+    return out
+  }
+
   /** 当前台账里的条数。 */
   get size(): number {
     return this.entries.size
@@ -100,13 +137,19 @@ export class IdempotencyLedger {
 
   /** 清空（解配对时调用：那条通道的命令 id 不再有意义）。 */
   clear(): void {
+    // 逐个走 `noteEvicted`：clear 的调用方（宿主侧解配对）要能一次拿到全部键，
+    // 而 `entries.clear()` 不会经过 delete 钩子。
+    for (const key of this.entries.keys()) this.evicted.push(key)
     this.entries.clear()
   }
 
   /** 丢掉窗口外的条目。 */
   prune(now: number): void {
     for (const [key, entry] of this.entries) {
-      if (now - entry.at >= this.windowMs) this.entries.delete(key)
+      if (now - entry.at >= this.windowMs) {
+        this.entries.delete(key)
+        this.evicted.push(key)
+      }
     }
   }
 
@@ -116,6 +159,7 @@ export class IdempotencyLedger {
       const oldest = this.entries.keys().next()
       if (oldest.done) break
       this.entries.delete(oldest.value)
+      this.evicted.push(oldest.value)
     }
   }
 }
