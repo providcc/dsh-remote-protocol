@@ -9,6 +9,10 @@
 
 **DSH Remote Control** 三端共用的线协议——DSH 宿主插件、零知识中继、微信小程序客户端。
 
+> **规范在 [`SPEC.md`](./SPEC.md)**（`dsh-rc/1`）。它是规范性文档：传输、控制面、
+> 密码学、数据面四层契约，用 RFC 2119 措辞写出义务；代码里每一处分支在规范里都有
+> 一句话说明它为什么长这样，规范里每一条 MUST 都有一道判据。
+
 这是一个**纯函数**库：没有 I/O、没有定时器、没有 `node:child_process`，也不认识任何宿主框架符号。
 因此每条冻结契约都能脱离环境单独被测，中继也能**只 import 类型**——它一个明文字节都不会碰。
 
@@ -31,19 +35,30 @@ npm install dsh-remote-wire
 
 ## 内容
 
-| 模块                                 | 导入路径                   | 职责                                                                |
-| ------------------------------------ | -------------------------- | ------------------------------------------------------------------- |
-| bytes                                | `dsh-remote-wire`（内部）  | base64 / UTF-8 / 拼接，与小程序 vendored 的 `js-base64` 逐字节一致  |
-| [keys](./src/crypto/keys.ts)         | `dsh-remote-wire/keys`     | PSK 生成、HKDF 风格的两把方向密钥派生、计数器 nonce 构造            |
-| [record](./src/crypto/record.ts)     | `dsh-remote-wire/record`   | `seal()` / `open()`——基于 `tweetnacl` 的 XSalsa20-Poly1305 密封记录 |
-| [frames](./src/wire/frames.ts)       | `dsh-remote-wire/frames`   | 每一条中继控制帧的 zod schema + 解析器                              |
-| [payloads](./src/wire/payloads.ts)   | `dsh-remote-wire/payloads` | `cmd.*` / `ev.*` 载荷目录的 zod schema                              |
-| [outbound](./src/wire/outbound.ts)   | `dsh-remote-wire/outbound` | 中继 → 端点、主机 → 客户端消息的类型化构造器                        |
-| [pairing](./src/identity/pairing.ts) | `dsh-remote-wire/pairing`  | `dshr:/p?...` 配对 URI 编解码、6 位码工具                           |
-| [ids](./src/identity/ids.ts)         | `dsh-remote-wire/ids`      | 会话 / 主机 / 命令 id 生成                                          |
-| [sleep](./src/platform/sleep.ts)     | `dsh-remote-wire/sleep`    | 防休眠命令构造器（`caffeinate` / `systemd-inhibit`）                |
+| 模块                                     | 导入路径                      | 职责                                                                |
+| ---------------------------------------- | ----------------------------- | ------------------------------------------------------------------- |
+| bytes                                    | `dsh-remote-wire`（内部）     | base64 / UTF-8 / 拼接，与小程序 vendored 的 `js-base64` 逐字节一致  |
+| [keys](./src/crypto/keys.ts)             | `dsh-remote-wire/keys`        | PSK 生成、HKDF 风格的两把方向密钥派生、计数器 nonce 构造            |
+| [record](./src/crypto/record.ts)         | `dsh-remote-wire/record`      | `seal()` / `open()`——基于 `tweetnacl` 的 XSalsa20-Poly1305 密封记录 |
+| [frames](./src/wire/frames.ts)           | `dsh-remote-wire/frames`      | 每一条中继控制帧的 zod schema + 解析器                              |
+| [limits](./src/wire/limits.ts)           | `dsh-remote-wire/limits`      | 三端共享的数值预算（帧上限、附件上限、去重窗口）                    |
+| [registry](./src/wire/registry.ts)       | `dsh-remote-wire/registry`    | 帧名 / 载荷名 / 能力 id 的注册表，编译期保证与 zod 联合一致         |
+| [classify](./src/wire/classify.ts)       | `dsh-remote-wire/classify`    | 入站帧的**分级**判定（规范 §4.3.2 的七步 + 配对特例）               |
+| [errors](./src/wire/errors.ts)           | `dsh-remote-wire/errors`      | 错误码的可重试性与技术描述                                          |
+| [negotiate](./src/wire/negotiate.ts)     | `dsh-remote-wire/negotiate`   | 版本与能力协商                                                      |
+| [idempotency](./src/wire/idempotency.ts) | `dsh-remote-wire/idempotency` | `cmdId` 去重台账（时钟注入的纯函数）                                |
+| [payloads](./src/wire/payloads.ts)       | `dsh-remote-wire/payloads`    | `cmd.*` / `ev.*` 载荷目录的 zod schema                              |
+| [outbound](./src/wire/outbound.ts)       | `dsh-remote-wire/outbound`    | 两个方向的出站帧与出站载荷的类型化构造器                            |
+| [pairing](./src/identity/pairing.ts)     | `dsh-remote-wire/pairing`     | `dshr:/p?...` 配对 URI 编解码、6 位码工具                           |
+| [ids](./src/identity/ids.ts)             | `dsh-remote-wire/ids`         | 会话 / 主机 / 命令 id 生成                                          |
+| [sleep](./src/platform/sleep.ts)         | `dsh-remote-wire/sleep`       | 防休眠命令构造器（`caffeinate` / `systemd-inhibit`）                |
 
 根入口（`dsh-remote-wire`）会把上面全部再导出一次。
+
+> `wire/` 下有一层是"规范的可执行部分"：`limits` / `registry` / `classify` /
+> `errors` / `negotiate` / `idempotency`。它们的存在理由写在各自的文件头，
+> 但一句话版本是：**此前这些规则只以注释和文档的形式存在，于是它们靠人同步，
+> 而人同步的结果是静默的**。
 
 ## 设计约束
 

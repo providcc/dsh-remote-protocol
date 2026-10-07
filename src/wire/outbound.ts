@@ -15,7 +15,8 @@
  * 这样 F4（必发帧的必填项）、F11（禁止字段）、F3（sessionId 逐字不变）
  * 才从"文档要求"变成"跑一下就红"。
  */
-import { MAX_CIPHERTEXT_BYTES, type ErrorCode } from './frames.js'
+import { MAX_CIPHERTEXT_BYTES, PROTOCOL_VERSION, type EndpointFrame, type ErrorCode } from './frames.js'
+import type { CapabilityId } from './registry.js'
 import {
   type ChoiceOption,
   type EvKeepAwakeState,
@@ -89,8 +90,24 @@ export function peerLeft(sessionId: string, clientId: string, unpaired?: boolean
   return { t: 'peer-left', sessionId, clientId, ...(unpaired ? { unpaired: true } : {}) }
 }
 
-export function makeError(code: ErrorCode, message?: string): RelayOutbound {
-  return { t: 'error', code, ...(message === undefined ? {} : { message }) }
+/**
+ * 构造一条错误帧。
+ *
+ * `retryAfterMs` 只给"等一等就好"的码（限流、表满）。规范 §12.2 E1 有一条硬要求：
+ * 发给 **client** 的错误必须带中文 `message`——协议层管不了文案（那是部署方与产品的事），
+ * 但它可以在这里把"带不带文案"变成一个签名上的选择：`message` 缺省时**不发这个字段**，
+ * 于是调用方想省掉文案是一件显眼的事，而不是 `undefined` 悄悄被 JSON 丢掉。
+ */
+export function makeError(code: ErrorCode, message?: string, retryAfterMs?: number): RelayOutbound {
+  if (retryAfterMs !== undefined && (!Number.isInteger(retryAfterMs) || retryAfterMs <= 0)) {
+    throw new Error(`error 的 retryAfterMs 必须是正整数，收到 ${String(retryAfterMs)}`)
+  }
+  return {
+    t: 'error',
+    code,
+    ...(message === undefined ? {} : { message }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  }
 }
 
 export function pong(ts?: number): RelayOutbound {
@@ -115,6 +132,133 @@ export function encBatchToClient(sessionId: string, items: Array<{ seq: number; 
     }
   }
   return { t: 'enc-batch', sessionId, items }
+}
+
+// ── endpoint → relay 的控制面 ─────────────────────────────────────────
+//
+// 补上的这一半（2026-10-07）：此前本文件只有"中继 → 端点"与"host → client 载荷"两段，
+// 于是 endpoint → relay 的那七个帧——恰好是中继唯一会**解析**的那一组——全靠调用方手写字面量。
+// 详见 helloForHost 的注释。
+
+/**
+ * 注册：host。
+ *
+ * **这个函数存在的原因**（2026-10-07）：宿主插件的七个出站控制帧全部是手写字面量
+ * （`dsh-remote-control/packages/plugin/src/transport/relay.ts:230,273,301,356,392,433,623`），
+ * 而**只有入站**帧过 `parseRelayFrameText`。于是给 `hello` / `enc` / `resync` 改字段
+ * 对它没有任何编译期信号：中继收到了形状不对的帧，回一句 `bad_frame`，
+ * 而插件这边一切正常。这是 F4 那条纪律（"参数表就是允许出现的字段集合"）的另一半，
+ * 此前只对 payload 生效。
+ *
+ * `capabilities` 缺省即"不发这个字段"——老中继 strip 掉它，行为与今天完全一致。
+ */
+export function helloForHost(args: {
+  token?: string
+  hostId?: string
+  label?: string
+  protocol?: number
+  capabilities?: readonly CapabilityId[]
+}): EndpointFrame {
+  return {
+    t: 'hello',
+    role: 'host',
+    ...(args.protocol === undefined ? { protocol: PROTOCOL_VERSION } : { protocol: args.protocol }),
+    ...(args.token === undefined ? {} : { token: args.token }),
+    ...(args.hostId === undefined ? {} : { hostId: args.hostId }),
+    ...(args.label === undefined ? {} : { label: args.label }),
+    ...(args.capabilities === undefined ? {} : { capabilities: [...args.capabilities] }),
+  }
+}
+
+/**
+ * 注册：client。
+ *
+ * `protocol` 缺省填本端版本（规范 §5.2 V1：缺省视为 1，这里把它**写出来**
+ * 而不是省掉——老对端读不到它，新对端不必猜）。小程序那份手写实现仍然恒发 1。
+ */
+export function helloForClient(args: {
+  clientId?: string
+  clientMeta?: { platform?: string; label?: string }
+  protocol?: number
+  capabilities?: readonly CapabilityId[]
+}): EndpointFrame {
+  return {
+    t: 'hello',
+    role: 'client',
+    ...(args.protocol === undefined ? { protocol: PROTOCOL_VERSION } : { protocol: args.protocol }),
+    ...(args.clientId === undefined ? {} : { clientId: args.clientId }),
+    ...(args.clientMeta === undefined ? {} : { clientMeta: args.clientMeta }),
+    ...(args.capabilities === undefined ? {} : { capabilities: [...args.capabilities] }),
+  }
+}
+
+/** host 发布一次性配对码（不含 PSK——D1 的执行点）。 */
+export function pairBegin(pairingToken: string): EndpointFrame {
+  return { t: 'pair-begin', pairingToken }
+}
+
+/** client 认领配对码。小程序从不提交 PSK。 */
+export function pairClaim(pairingToken: string): EndpointFrame {
+  return { t: 'pair-begin-client', pairingToken }
+}
+
+/**
+ * 心跳。**生产路径不用它**（规范 §4.4：保活靠 WS 层 ping，应用层 ping 会周期性
+ * 踢掉空闲客户端）。它在这里是为了让"插件自发探活那条路径"也有一个受 schema 约束的构造器，
+ * 而不是像今天这样手写 `{t:'ping', ts}`。
+ */
+export function ping(ts?: number): EndpointFrame {
+  return { t: 'ping', ...(ts === undefined ? {} : { ts }) }
+}
+
+/**
+ * endpoint → relay 的数据面帧。
+ *
+ * 与 `encToClient` 的唯一区别是方向命名，因为两边的**长度守门是同一条**：
+ * 超过上限的密文会让对侧静默丢帧，而中继在转发前只看字符集、不看长度。
+ */
+export function encToRelay(sessionId: string, seq: number, ciphertext: string): EndpointFrame {
+  if (ciphertext.length > MAX_CIPHERTEXT_BYTES) {
+    throw new Error(`密文 ${ciphertext.length} 字节超过上限 ${MAX_CIPHERTEXT_BYTES}`)
+  }
+  return { t: 'enc', sessionId, seq, ciphertext }
+}
+
+export function encBatchToRelay(
+  sessionId: string,
+  items: ReadonlyArray<{ seq: number; ciphertext: string }>,
+): EndpointFrame {
+  if (items.length === 0) throw new Error('enc-batch 至少要带一项')
+  for (const item of items) {
+    if (item.ciphertext.length > MAX_CIPHERTEXT_BYTES) {
+      throw new Error(`密文 ${item.ciphertext.length} 字节超过上限 ${MAX_CIPHERTEXT_BYTES}`)
+    }
+  }
+  return { t: 'enc-batch', sessionId, items: items.map((item) => ({ ...item })) }
+}
+
+/**
+ * 显式退出某个会话。
+ *
+ * `clientId` 可选且**只有 client 会带**：中继据此区分"这条 frame 的发送方是会话成员"
+ * 与"host 作废了自己的会话"，两条路径给 `peer-left` 的触发完全不同（规范 §8.3）。
+ */
+export function sessionLeave(sessionId: string, clientId?: string): EndpointFrame {
+  return { t: 'session-leave', sessionId, ...(clientId === undefined ? {} : { clientId }) }
+}
+
+/**
+ * host 声明"我此刻仍持有密钥的会话"（规范 §8.4）。
+ *
+ * 上限与 `resyncFrame` 的 `.max(2000)` 同源：一条超长的数组会让中继白占内存，
+ * 而它对配对没有那么多条通道的要求。构造器在这里先挡一道，
+ * 免得造出一条**自己收不了**的帧。
+ */
+export function resync(sessionIds: readonly string[]): EndpointFrame {
+  if (sessionIds.length > 2000) {
+    throw new Error(`resync 最多带 2000 个会话，收到 ${sessionIds.length}`)
+  }
+  return { t: 'resync', sessionIds: [...sessionIds] }
 }
 
 // ── host → client 的数据面载荷 ───────────────────────────────────────

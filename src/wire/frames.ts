@@ -22,33 +22,38 @@
  *   （前者中继从未发送/处理，后者的 `sessionIds`/`includeContent` 没有任何效果）。
  */
 import { z } from 'zod'
+import { MAX_CIPHERTEXT_BYTES, MAX_RELAY_MESSAGE_BYTES } from './limits.js'
+
+/**
+ * 帧大小预算住 `limits.ts`（三端共享的数值只有一个来源），这里**必须继续转出**：
+ * 中继 `src/config.ts` 从 `dsh-remote-wire/frames` 引 `MAX_RELAY_MESSAGE_BYTES`
+ * 当 `DRC_MAX_MSG_BYTES` 的默认值，撤掉这条转出是一个只会在下游编译期爆炸的变更。
+ */
+export { MAX_CIPHERTEXT_BYTES, MAX_RELAY_MESSAGE_BYTES }
 
 /** 协议版本。小程序恒发 `1`（F2）。 */
 export const PROTOCOL_VERSION = 1
+
+/** 本协议能接受的**最低**对端版本（规范 §5.2 V3）。 */
+export const MIN_SUPPORTED_PROTOCOL = 1
 
 /** 6 位配对码。位数变了要同时动三处（中继校验、主机生成、小程序归一化），而小程序改不了。 */
 export const PAIRING_TOKEN_RE = /^\d{6}$/
 
 /**
- * 中继单条 WS 消息的默认预算（`DRC_MAX_MSG_BYTES` 默认 1 MiB）。
- *
- * 为什么协议层要写这个数（2026-10-06 审计）：密文上限原本是 512 KiB，
- * 而手机侧附件闸门是 512 KiB **原始字节**——base64 胀 4/3、再加 secretbox 封装，
- * 一条合法的四图/一文件消息的密文约 930 KiB，**过不了自己家的 schema**，
- * 被中继以 `unknown_frame` 丢掉。用户看到的是"图片/文件发不出去"。
- * 现在两边同源：上限按中继预算倒推，留出信封字段（t/sessionId/seq）的余量。
+ * 帧大小预算（`MAX_RELAY_MESSAGE_BYTES` / `MAX_CIPHERTEXT_BYTES`）的定义在
+ * `limits.ts`，本文件只转出——转出的理由见文件顶部的 import 旁注。
+ * 那两个数为什么是今天这个值（1 MiB 预算、8 KiB 信封余量）记在 `limits.ts` 里。
  */
-export const MAX_RELAY_MESSAGE_BYTES = 1024 * 1024
-
-/**
- * 一条密文记录的上限。取 `中继预算 - 8 KiB`：信封 JSON（t/sessionId/seq 与引号）
- * 远小于 8 KiB，留这个余量是为了让"合法帧必然过得了中继"成为**结构性保证**，
- * 而不是靠估算。手机侧的附件闸门（512 KiB 原始字节 ≈ 930 KiB 密文）落在它下面。
- */
-export const MAX_CIPHERTEXT_BYTES = MAX_RELAY_MESSAGE_BYTES - 8 * 1024
 
 const nonEmpty = z.string().min(1)
 const pairingToken = z.string().regex(PAIRING_TOKEN_RE)
+
+/**
+ * 能力列表（规范 §5.3 C1）。上限是**安全要求**，不是洁癖：
+ * `hello` 在认证之前就能收到，一条超长数组会白占内存，而它对未认证的对端毫无价值。
+ */
+const capabilityList = z.array(z.string().min(1).max(64)).max(64)
 
 /**
  * 密文记录的合法性预检。
@@ -83,6 +88,11 @@ export const helloFrame = z.object({
   t: z.literal('hello'),
   role: z.enum(['host', 'client']),
   protocol: z.number().int().positive().optional(),
+  /**
+   * 本端支持的能力（规范 §5.3）。**可选**：老对端不带，老中继也照旧工作——
+   * 缺省按"只支持基线"处理，而不是按"什么都不支持"拒绝。
+   */
+  capabilities: capabilityList.optional(),
   /** host 的出站认证凭据，与中继的 `DRC_HOST_TOKEN` 定时安全比较。上限防超长串白占内存。 */
   token: z.string().min(1).max(512).optional(),
   hostId: nonEmpty.optional(),
@@ -192,6 +202,8 @@ export const helloOkFrame = z.object({
   clientId: z.string().min(1).max(128).optional(),
   hostId: nonEmpty.optional(),
   protocol: z.number().int().positive().optional(),
+  /** 中继自己支持的能力（规范 §5.3）。端点据此知道自己能向它要什么。 */
+  capabilities: capabilityList.optional(),
 })
 
 /** 服务端权威 TTL。**主机必须据此改写本地过期时间**——这是旧实现的第一起事故。 */
@@ -269,6 +281,15 @@ export const errorCodes = [
   'rate_limited',
   'bad_json',
   'unknown_frame',
+  /**
+   * 对端的对端版本落在 `[MIN_SUPPORTED_PROTOCOL, 本端]` 之外（规范 §5.2 V3）。
+   *
+   * 为什么不复用 `bad_frame`：它是**版本问题**而不是形状问题，而它唯一该触发的
+   * 动作是"把版本说清楚"——一句"帧形状非法"会让用户去查一个根本不存在的问题。
+   * 加它不破坏任何老实现：老 client 见到不认识的码会走兜底展示（`message || code`），
+   * 所以中继 MUST 同时带上一句中文 message（规范 §12.3 E1）。
+   */
+  'unsupported_protocol',
   'internal',
 ] as const
 
@@ -276,6 +297,14 @@ export const errorFrame = z.object({
   t: z.literal('error'),
   code: z.enum(errorCodes),
   message: z.string().max(512).optional(),
+  /**
+   * 多久之后可以再来（毫秒）。借鉴 RFC 9110 的 `Retry-After` 的**毫秒形态**。
+   *
+   * 只有 `rate_limited` / `pair_table_full` 这类"等一等就好"的码才带它：
+   * 端点拿它直接算退避，而没有它时只能盲退——盲退在限速窗口上等于
+   * "再多撞几次，每一次都让窗口重新计时"。
+   */
+  retryAfterMs: z.number().int().positive().max(300_000).optional(),
 })
 export type ErrorCode = z.infer<typeof errorFrame>['code']
 

@@ -8,8 +8,15 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MAX_CIPHERTEXT_BYTES, parseRelayFrame, relayFrame } from '../../src/wire/frames.js'
+import {
+  MAX_CIPHERTEXT_BYTES,
+  PROTOCOL_VERSION,
+  parseEndpointFrame,
+  parseRelayFrame,
+  relayFrame,
+} from '../../src/wire/frames.js'
 import { parseEvPayload } from '../../src/wire/payloads.js'
+import type { CapabilityId } from '../../src/wire/registry.js'
 import {
   encBatchToClient,
   encToClient,
@@ -35,6 +42,15 @@ import {
   permissionResolved,
   questionRequest,
   questionResolved,
+  encToRelay,
+  encBatchToRelay,
+  helloForClient,
+  helloForHost,
+  pairBegin,
+  pairClaim,
+  ping,
+  resync,
+  sessionLeave,
 } from '../../src/wire/outbound.js'
 
 const keysOf = (value: object): string[] => Object.keys(value).sort()
@@ -240,4 +256,74 @@ test('enc 构造器：超过中继预算的密文当场抛，不发一帧注定�
   assert.throws(() => encToClient('c_x', 1, 'A'.repeat(MAX_CIPHERTEXT_BYTES + 1)))
   assert.throws(() => encBatchToClient('c_x', []), '空批量帧会被 schema 拒（items 要 min(1)）')
   assert.doesNotThrow(() => encBatchToClient('c_x', [{ seq: 1, ciphertext: 'AAEC' }]))
+})
+
+// ── endpoint → relay 的构造器（2026-10-07）─────────────────────────────────
+//
+// 补上的这一半。此前宿主插件的七个出站控制帧全是手写字面量，而**只有入站**帧过
+// schema —— 给 hello / enc / resync 改字段对它没有任何编译期信号。
+// 这组判据守的是"构造器造出来的帧一定过得了对端的 schema"。
+
+test('endpoint → relay 的七个构造器：产物全部过 parseEndpointFrame', () => {
+  const frames = [
+    helloForHost({ token: 'tok', hostId: 'h1', label: 'mac', capabilities: ['drc.v1'] }),
+    helloForClient({ clientId: 'c1', clientMeta: { platform: 'wechat-mp', label: '微信小程序' } }),
+    pairBegin('123456'),
+    pairClaim('123456'),
+    ping(),
+    ping(42),
+    encToRelay('c_0123456789ab', 7, 'AAEC'),
+    encBatchToRelay('c_0123456789ab', [{ seq: 1, ciphertext: 'AAEC' }]),
+    sessionLeave('c_0123456789ab'),
+    sessionLeave('c_0123456789ab', 'client-1'),
+    resync(['c_0123456789ab']),
+  ]
+  for (const frame of frames) {
+    assert.ok(parseEndpointFrame(frame), `构造器产物过不了自己的 schema：${JSON.stringify(frame)}`)
+  }
+})
+
+test('hello 构造器：protocol 缺省即写出本端版本，capabilities 缺省就不带这个键', () => {
+  const bare = helloForHost({})
+  assert.ok(bare.t === 'hello')
+  assert.deepEqual(keysOf(bare).sort(), ['protocol', 'role', 't'])
+  assert.equal(bare.protocol, PROTOCOL_VERSION)
+  assert.ok(!('capabilities' in bare), '缺省时不该有这个键——老中继 strip 掉它，但省掉更干净')
+  const full = helloForHost({ token: 't', hostId: 'h', label: 'L', capabilities: ['drc.v1', 'drc.host.resync'] })
+  assert.deepEqual(keysOf(full).sort(), ['capabilities', 'hostId', 'label', 'protocol', 'role', 't', 'token'])
+  // 能力数组是复制进去的：调用方之后改自己的数组，不该改掉已经造好的帧
+  const caps: CapabilityId[] = ['drc.v1']
+  const frame = helloForClient({ capabilities: caps })
+  caps.push('drc.host.info')
+  assert.ok(frame.t === 'hello')
+  assert.deepEqual(frame.capabilities, ['drc.v1'])
+})
+
+test('encToRelay 与 encBatchToRelay 与发给 client 的那对一样守密文长度', () => {
+  assert.throws(() => encToRelay('c_x', 1, 'A'.repeat(MAX_CIPHERTEXT_BYTES + 1)))
+  assert.throws(() => encBatchToRelay('c_x', []), '空批量帧会被 schema 拒')
+  assert.throws(() => encBatchToRelay('c_x', [{ seq: 1, ciphertext: 'A'.repeat(MAX_CIPHERTEXT_BYTES + 1) }]))
+  assert.doesNotThrow(() => encToRelay('c_x', 1, 'AAEC'))
+})
+
+test('resync 的条数上界与 schema 同源：造一条自己收不了的帧是最贵的错误', () => {
+  assert.throws(() => resync(Array.from({ length: 2001 }, (_, i) => `c_${i}`)), /2000/)
+  assert.doesNotThrow(() => resync([]), '空列表是合法的：主机确实可能一个会话都不剩')
+  const ids = ['c_a', 'c_b']
+  const built = resync(ids)
+  assert.ok(built.t === 'resync')
+  assert.deepEqual(built.sessionIds, ids)
+  ids.push('c_c')
+  assert.equal(built.sessionIds.length, 2, '传入的数组被复制，不被持有')
+})
+
+test('makeError：retryAfterMs 缺省就不带这个键，带了必须是正整数', () => {
+  assert.deepEqual(keysOf(makeError('internal')), ['code', 't'])
+  assert.deepEqual(keysOf(makeError('rate_limited', '太频繁了', 1500)), ['code', 'message', 'retryAfterMs', 't'])
+  for (const bad of [0, -1, 1.5, Number.NaN]) {
+    assert.throws(() => makeError('rate_limited', 'x', bad), `retryAfterMs=${String(bad)} 不该被接受`)
+  }
+  // 发给 client 的错误必须带中文 message（规范 §12.3 E1）：协议层管不了文案，
+  // 但可以让"不带文案"变成一个显眼的选择。
+  assert.ok(!('message' in makeError('internal')))
 })

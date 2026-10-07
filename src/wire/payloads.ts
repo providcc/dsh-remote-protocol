@@ -24,6 +24,7 @@
  * 不会把对端多塞的东西原样转发到手机上。
  */
 import { z } from 'zod'
+import { MAX_FILE_ATTACHMENTS, MAX_IMAGE_ATTACHMENTS } from './limits.js'
 
 /** 会话状态枚举。拼错一个字符，手机端徽标会退化成"空闲"——归档会话因此看着像正常会话。 */
 export const SESSION_STATES = [
@@ -470,14 +471,17 @@ export const cmdSendPrompt = z.object({
   /**
    * 随消息的图片附件。**可选**：老版本手机不带这个字段，老主机看到也不认
    * （zod 默认 strip 未知键，而 text 照旧）——所以这是向后兼容的增补，不升协议版本。
-   * 上限 4 张：再多对"看清楚这张图"没有帮助，只是把帧撑爆。
+   * 上限取 `limits.ts` 的 `MAX_IMAGE_ATTACHMENTS`（4）：再多对"看清楚这张图"没有帮助，
+   * 只是把帧撑爆。**同一个数**还在小程序（`MAX_ATTACH`）与主机侧（`uploads.ts`）各写一遍，
+   * 靠 `e2e/wire-surface.test.mjs` 逐处比对钉住——改动必须三处同时发生。
    */
-  images: z.array(imageAttachment).max(4).optional(),
+  images: z.array(imageAttachment).max(MAX_IMAGE_ATTACHMENTS).optional(),
   /**
    * 随消息的文件附件。与 images 同一条理由（可选、strip、不升版本）。
-   * 上限 4 个：再多就不是"随手带个文件"，该换成别的方式交付。
+   * 与图片**同值**：两类附件在 mp 侧共用一个 `MAX_ATTACH`，上限不同会让人以为
+   * "带五张图不行，带五个文件可以"。
    */
-  files: z.array(fileAttachment).max(4).optional(),
+  files: z.array(fileAttachment).max(MAX_FILE_ATTACHMENTS).optional(),
 })
 
 const answerItem = z.object({

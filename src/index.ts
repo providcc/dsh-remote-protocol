@@ -22,13 +22,26 @@
  *
  * 目录按关注点分组：`crypto/` 是密封记录与密钥派生，`wire/` 是帧与载荷，
  * `identity/` 是会话标识与配对，`platform/` 是与宿主环境相关的命令构造。
+ *
+ * `wire/` 下另有一层"规范的可执行部分"（2026-10-07 起）：
+ * `limits`（三端共享的数值预算）、`registry`（帧名/载荷名/能力 id 的注册表）、
+ * `classify`（规范 §4.3.2 的七步分级判定）、`errors`（错误码的可重试性）、
+ * `negotiate`（版本与能力协商）、`idempotency`（`cmdId` 去重）。
+ * 它们都是纯函数，与协议文档 [SPEC.md](./SPEC.md) 一一对应——
+ * 规范里每一条 MUST，在这一层里都有一处代码。
  */
 export * from './crypto/bytes.js'
 export * from './crypto/keys.js'
 export * from './crypto/record.js'
 export * from './identity/pairing.js'
+export * from './wire/limits.js'
 export * from './wire/frames.js'
 export * from './wire/payloads.js'
 export * from './wire/outbound.js'
+export * from './wire/registry.js'
+export * from './wire/classify.js'
+export * from './wire/errors.js'
+export * from './wire/negotiate.js'
+export * from './wire/idempotency.js'
 export * from './platform/sleep.js'
 export * from './identity/ids.js'

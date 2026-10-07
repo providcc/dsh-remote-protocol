@@ -39,6 +39,30 @@
       "types": "./dist/src/wire/frames.d.ts",
       "default": "./dist/src/wire/frames.js"
     },
+    "./limits": {
+      "types": "./dist/src/wire/limits.d.ts",
+      "default": "./dist/src/wire/limits.js"
+    },
+    "./registry": {
+      "types": "./dist/src/wire/registry.d.ts",
+      "default": "./dist/src/wire/registry.js"
+    },
+    "./classify": {
+      "types": "./dist/src/wire/classify.d.ts",
+      "default": "./dist/src/wire/classify.js"
+    },
+    "./errors": {
+      "types": "./dist/src/wire/errors.d.ts",
+      "default": "./dist/src/wire/errors.js"
+    },
+    "./negotiate": {
+      "types": "./dist/src/wire/negotiate.d.ts",
+      "default": "./dist/src/wire/negotiate.js"
+    },
+    "./idempotency": {
+      "types": "./dist/src/wire/idempotency.d.ts",
+      "default": "./dist/src/wire/idempotency.js"
+    },
     "./payloads": {
       "types": "./dist/src/wire/payloads.d.ts",
       "default": "./dist/src/wire/payloads.js"

@@ -210,3 +210,53 @@ test('hello 的 clientMeta 与 token 有长度上限：未认证输入不许放�
   assert.equal(parseEndpointFrame({ t: 'hello', role: 'host', token: 'x'.repeat(513) }), null)
   assert.ok(parseEndpointFrame({ t: 'hello', role: 'host', token: 'x'.repeat(512) }))
 })
+
+// ── 版本 / 能力 / 重试提示（规范 §5.2、§5.3、§12.2）────────────────────
+
+test('hello / hello-ok 接受 capabilities，长度有上界（hello 在认证之前就能收到）', () => {
+  assert.ok(parseEndpointFrame({ t: 'hello', role: 'host', protocol: 1, capabilities: ['drc.v1'] }))
+  assert.ok(parseRelayFrame({ t: 'hello-ok', role: 'host', hostId: 'h', protocol: 1, capabilities: ['drc.v1'] }))
+  // 老对端不带它：缺省即"只支持基线"，不是"什么都不支持"
+  assert.ok(parseEndpointFrame({ t: 'hello', role: 'client', protocol: 1 }))
+  assert.equal(parseEndpointFrame({ t: 'hello', role: 'host', capabilities: 'drc.v1' }), null)
+  assert.equal(parseEndpointFrame({ t: 'hello', role: 'host', capabilities: ['x'.repeat(65)] }), null)
+  assert.equal(parseEndpointFrame({ t: 'hello', role: 'host', capabilities: Array(65).fill('drc.v1') }), null)
+  assert.ok(parseEndpointFrame({ t: 'hello', role: 'host', capabilities: Array(64).fill('drc.v1') }))
+})
+
+test('error 带 retryAfterMs：正整数与上界都要守（它是端点算退避的唯一依据）', () => {
+  assert.ok(errorFrame.safeParse({ t: 'error', code: 'rate_limited', message: '太频繁', retryAfterMs: 1500 }).success)
+  assert.ok(errorFrame.safeParse({ t: 'error', code: 'internal' }).success, '缺省合法：不是所有码都知道该等多久')
+  assert.equal(errorFrame.safeParse({ t: 'error', code: 'rate_limited', retryAfterMs: 0 }).success, false)
+  assert.equal(errorFrame.safeParse({ t: 'error', code: 'rate_limited', retryAfterMs: -1 }).success, false)
+  assert.equal(errorFrame.safeParse({ t: 'error', code: 'rate_limited', retryAfterMs: 1.5 }).success, false)
+  assert.equal(errorFrame.safeParse({ t: 'error', code: 'rate_limited', retryAfterMs: 300_001 }).success, false)
+})
+
+test('unsupported_protocol 在错误码枚举里，且只有它是"版本问题"的码', () => {
+  assert.ok(errorFrame.safeParse({ t: 'error', code: 'unsupported_protocol', message: '版本太旧' }).success)
+  // 它不能替掉任何一个既有码：删一个会让中继的 ErrorCode 联合少一项，直接编译不过
+  for (const code of [
+    'bad_token',
+    'need_host',
+    'need_client',
+    'bad_pair',
+    'pair_table_full',
+    'unknown_session',
+    'not_member',
+    'host_unavailable',
+    'bad_frame',
+    'rate_limited',
+    'bad_json',
+    'unknown_frame',
+    'internal',
+  ]) {
+    assert.ok(errorFrame.safeParse({ t: 'error', code }).success, `${code} 不能被删`)
+  }
+  assert.equal(errorFrame.safeParse({ t: 'error', code: 'version_too_old' }).success, false)
+})
+
+test('预算常量仍然从 frames 转出（下游从 dsh-remote-wire/frames 引它们）', () => {
+  assert.ok(MAX_CIPHERTEXT_BYTES < MAX_RELAY_MESSAGE_BYTES)
+  assert.equal(PROTOCOL_VERSION, 1)
+})
