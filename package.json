@@ -102,9 +102,10 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm clean && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test \"dist/tests/**/*.test.js\"",
+    "test": "pnpm build && node --test \"dist/tests/**/*.test.js\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "tsc -p tsconfig.json"
