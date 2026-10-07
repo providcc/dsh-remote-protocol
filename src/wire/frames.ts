@@ -226,7 +226,11 @@ export const pairReadyFrame = z.object({
    * 本机线上 180 s），30 天已经宽到不可能是误配。而它离 Date 的上限
    * 仍有 11 个数量级，所以这条约束不会在可见的将来变成障碍。
    */
-  ttlMs: z.number().int().positive().max(30 * 24 * 3600 * 1000),
+  ttlMs: z
+    .number()
+    .int()
+    .positive()
+    .max(30 * 24 * 3600 * 1000),
 })
 
 export const pairedFrame = z.object({

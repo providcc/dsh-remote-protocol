@@ -625,12 +625,12 @@ client 侧的块流模型已经把 `ev.message_delta` 与 `ev.tool_event` 的回
 
 ### 10.6 会话归档
 
-| 编号   | 义务                                                                                                    |
-| ------ | ------------------------------------------------------------------------------------------------------- |
-| **A1** | host MUST NOT 因为 `cmd.archive_session` 而**中断**会话。仍在运行的会话 MUST 回 `ev.result{ok:false}`      |
-| **A2** | host MUST NOT 静默成功：不支持归档的一代 MUST 回 `ev.result{ok:false, message}` 说明原因                 |
-| **A3** | 归档成功后 host MUST 补推一次 `ev.session_changed`（本端不消费 `workspace/changes`）                     |
-| **A4** | 协议 MUST NOT 提供"连带停止"这个参数（见下）                                                            |
+| 编号   | 义务                                                                                                  |
+| ------ | ----------------------------------------------------------------------------------------------------- |
+| **A1** | host MUST NOT 因为 `cmd.archive_session` 而**中断**会话。仍在运行的会话 MUST 回 `ev.result{ok:false}` |
+| **A2** | host MUST NOT 静默成功：不支持归档的一代 MUST 回 `ev.result{ok:false, message}` 说明原因              |
+| **A3** | 归档成功后 host MUST 补推一次 `ev.session_changed`（本端不消费 `workspace/changes`）                  |
+| **A4** | 协议 MUST NOT 提供"连带停止"这个参数（见下）                                                          |
 
 > **A1 为什么不是"自动停掉"**：内核的 `archiveSession(sessionId, { stopActivity: true })`
 > 能强行归档一条正在跑的会话，但那是**用户在手机上的一次误点**换来的主机上正在跑的工作被停掉。
