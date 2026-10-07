@@ -388,6 +388,8 @@ export type CmdKeepAwake = z.infer<typeof cmdKeepAwake>
 export type CmdNewSession = z.infer<typeof cmdNewSession>
 /** cmdGetPending 的推导类型。 */
 export type CmdGetPending = z.infer<typeof cmdGetPending>
+/** cmdArchiveSession 的推导类型。 */
+export type CmdArchiveSession = z.infer<typeof cmdArchiveSession>
 
 /**
  * 出站载荷（host → client）。小程序解密后按 `t` 分发，认不出的类型被**静默丢弃**，
@@ -612,7 +614,50 @@ export const cmdGetPending = z.object({
 })
 
 /**
- * 手机发来的命令，共 9 种——就是 `mp/core/client.js` 的便捷方法能产出的全部。
+ * 归档 / 取消归档一条会话（`sessionId` 是 DSH 会话 id，不是配对通道 id，F3）。
+ *
+ * ## 名字为什么是小写下划线
+ *
+ * `cmd.archive_session` 而不是 `cmd.archiveSession`——`e2e/wire-surface.test.mjs`
+ * 那道闸的正则是 `^(cmd|ev)\.[a-z0-9_]+$`，驼峰会被它判成"手拼错了"。
+ * 与其改那道闸（它拦的是真 typo），不如跟着它的形状写。
+ *
+ * ## `archived: false` 是取消归档
+ *
+ * 用一个布尔而不是两条命令：归档与取消归档是**同一个内核方法的两侧**
+ * （`workspaceRegistry.archiveSession` / `unarchiveSession`），
+ * 而协议层每加一条命令就要在四个地方各写一遍（`PAYLOAD_TYPES`、`CMD_TYPES`、
+ * mp 的便捷方法、宿主的 switch）。少一半登记点等于少一半"加了命令忘了接线"的机会。
+ *
+ * ## 缺省是 `true`（归档）
+ *
+ * 手机发的是"归档"这个动作，`archived: false` 只在取消时出现。方向选错的后果
+ * 是不对称的：把"取消"当成"归档"会**藏起**一条会话（还能取消回来）；
+ * 反过来会把一条归档会话**放回列表**（用户会以为归档没生效）。
+ * 所以宁可让缺省落在可逆的那一侧。
+ *
+ * ## ⚠️ 不含 `stopActivity`（刻意）
+ *
+ * 内核的 `archiveSession(sessionId, { stopActivity })` 在会话还在跑时**抛**
+ * `WorkspaceActiveSessionError`，除非传 `stopActivity: true`——而那会**停掉主机上
+ * 正在跑的工作**。那与"插件不改变宿主自己的行为"这条纪律直接冲突：
+ * 用户在手机上误点一下，主机上正在跑的任务就断了。
+ *
+ * 所以协议里**根本没有这个字段**：主机侧收到这一条时的正确行为是
+ * **明确回 `ev.result{ok:false, message}` 说"会话正在运行，不能归档"**，
+ * 让用户回工作台停。要"连带停掉"是另一个决定，需要另开一条命令并单独评审。
+ */
+export const cmdArchiveSession = z.object({
+  t: z.literal('cmd.archive_session'),
+  cmdId: nonEmpty,
+  /** DSH 会话 id。 */
+  sessionId: nonEmpty,
+  /** 缺省 = 归档；`false` = 取消归档。 */
+  archived: z.boolean().optional(),
+})
+
+/**
+ * 手机发来的命令，共 10 种——就是 `mp/core/client.js` 的便捷方法能产出的全部。
  *
  * 旧实现还有一个 `cmd.subscribe`：它的 handler 只回一个 `ev.result{ok:true}`，
  * `sessionIds`/`includeContent` 没有任何过滤效果，而小程序从不发它。
@@ -628,6 +673,7 @@ export const cmdPayload = z.discriminatedUnion('t', [
   cmdSessionHistory,
   cmdNewSession,
   cmdGetPending,
+  cmdArchiveSession,
 ])
 export type CmdPayload = z.infer<typeof cmdPayload>
 
@@ -654,6 +700,7 @@ export const PAYLOAD_TYPES = {
   cmdSessionHistory: 'cmd.session_history',
   cmdNewSession: 'cmd.new_session',
   cmdGetPending: 'cmd.get_pending',
+  cmdArchiveSession: 'cmd.archive_session',
   evSessionChanged: 'ev.session_changed',
   evMessageDelta: 'ev.message_delta',
   evToolEvent: 'ev.tool_event',

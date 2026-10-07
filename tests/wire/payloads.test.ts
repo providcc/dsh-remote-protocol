@@ -9,6 +9,7 @@ import {
   PAYLOAD_TYPES,
   SESSION_STATES,
   cmdAnswer,
+  cmdArchiveSession,
   cmdGetPending,
   cmdPayload,
   cmdKeepAwake,
@@ -24,6 +25,7 @@ import {
   evQuestionRequest,
   evSessionChanged,
 } from '../../src/wire/payloads.js'
+import { CMD_TYPES } from '../../src/wire/registry.js'
 
 test('九个命令逐个通过；t 拼错的载荷必须被拒（不认识的命令不能当命令执行）', () => {
   assert.ok(parseCmdPayload({ t: 'cmd.send_prompt', cmdId: 'c1', sessionId: 'ses_1', text: '只回复 ok' }))
@@ -508,4 +510,54 @@ test('空的提问与空的作答都不合法：它们都是"看着像答案、�
     cmdAnswer.safeParse({ t: 'cmd.answer', cmdId: 'c', sessionId: 's', requestId: 'r', answers: [] }).success,
     false,
   )
+})
+
+// ── cmd.archive_session（2026-10-07 加）────────────────────────────────
+
+test('cmd.archive_session：archived 缺省即归档，false 是取消归档', () => {
+  // 缺省落在"归档"这一侧，而它**可逆**（取消归档能拿回来）。方向选错的后果不对称：
+  // 把"取消"当成归档会藏起一条会话，把归档当成取消会把它放回列表、用户以为归档没生效。
+  assert.equal(cmdArchiveSession.safeParse({ t: 'cmd.archive_session', cmdId: 'c1', sessionId: 's1' }).success, true)
+  assert.equal(
+    cmdArchiveSession.safeParse({ t: 'cmd.archive_session', cmdId: 'c1', sessionId: 's1', archived: false }).success,
+    true,
+  )
+  assert.equal(
+    cmdArchiveSession.safeParse({ t: 'cmd.archive_session', cmdId: 'c1', sessionId: 's1', archived: true }).success,
+    true,
+  )
+})
+
+test('cmd.archive_session：sessionId 与 cmdId 都必填（按 cmdId 回执是它唯一的回执路径）', () => {
+  assert.equal(cmdArchiveSession.safeParse({ t: 'cmd.archive_session', cmdId: 'c1' }).success, false)
+  assert.equal(cmdArchiveSession.safeParse({ t: 'cmd.archive_session', sessionId: 's1' }).success, false)
+  // zod strip 未知键而不是报错 —— 所以「多带一个 stopActivity」会**静默丢掉**。
+  // 协议里刻意没有这个字段（它会停掉主机上正在跑的工作，见 payloads.ts 的注）。
+  const parsed = cmdArchiveSession.safeParse({
+    t: 'cmd.archive_session',
+    cmdId: 'c1',
+    sessionId: 's1',
+    stopActivity: true,
+  })
+  assert.equal(parsed.success, true)
+  assert.ok(parsed.success)
+  assert.ok(
+    !('stopActivity' in parsed.data),
+    'stopActivity 必须被 strip 掉：它在协议里不存在，误加它等于"静默接受一个会停主机工作的参数"',
+  )
+})
+
+test('cmd.archive_session 进得了 cmdPayload 联合（否则主机 switch 永远走不到这一支）', () => {
+  // 这条判据的作用是"注册表与联合不同步时变红"：漏把 cmdArchiveSession 加进
+  // `cmdPayload` 的判别联合，它能过自己的 schema，却永远不会被 parseCmdPayload 收下。
+  const ok = parseCmdPayload({ t: 'cmd.archive_session', cmdId: 'c1', sessionId: 's1' })
+  assert.ok(ok, 'parseCmdPayload 必须认这条命令')
+  assert.equal(ok?.t, 'cmd.archive_session')
+  assert.equal(PAYLOAD_TYPES.cmdArchiveSession, 'cmd.archive_session')
+  assert.ok(
+    CMD_TYPES.includes('cmd.archive_session'),
+    'registry.CMD_TYPES 里没有它 —— wire-surface 那道闸会比对这两张表',
+  )
+  // 错字必须被挡在外面（真的在真机上发过 `cmd.archiveSessions` 会被主机静默丢包）
+  assert.equal(parseCmdPayload({ t: 'cmd.archiveSessions', cmdId: 'c1', sessionId: 's1' }), null)
 })

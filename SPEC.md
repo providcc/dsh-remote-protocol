@@ -533,6 +533,7 @@ client 既收不到回复、也收不到 `unknown_session`，表现是"永远转
 | `cmd.session_history`    | `cmdId`, `sessionId`                             | 读历史，游标分页（§10.4）                           |
 | `cmd.new_session`        | `cmdId`                                          | 新建会话，可选 `workspace`（目录绝对路径）          |
 | `cmd.get_pending`        | `cmdId`                                          | 拉还挂着的审批/提问，可选 `sessionId`               |
+| `cmd.archive_session`    | `cmdId`, `sessionId`                             | 归档（缺省）/ 取消归档（`archived:false`）。见 A-1  |
 
 **每条 `cmd.*` 的 MUST：**
 
@@ -621,6 +622,25 @@ client 侧的块流模型已经把 `ev.message_delta` 与 `ev.tool_event` 的回
 > **为什么"没有游标"就等于"到底了"，而不用 `hasMore`**：两个字段表达同一件事，
 > 迟早会出现"说还有、却没给游标"这种自相矛盾的载荷，而它的表现是
 > 「加载更早」点了没反应，且**没有任何报错**。一个字段就没有这种状态。
+
+### 10.6 会话归档
+
+| 编号   | 义务                                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------- |
+| **A1** | host MUST NOT 因为 `cmd.archive_session` 而**中断**会话。仍在运行的会话 MUST 回 `ev.result{ok:false}`      |
+| **A2** | host MUST NOT 静默成功：不支持归档的一代 MUST 回 `ev.result{ok:false, message}` 说明原因                 |
+| **A3** | 归档成功后 host MUST 补推一次 `ev.session_changed`（本端不消费 `workspace/changes`）                     |
+| **A4** | 协议 MUST NOT 提供"连带停止"这个参数（见下）                                                            |
+
+> **A1 为什么不是"自动停掉"**：内核的 `archiveSession(sessionId, { stopActivity: true })`
+> 能强行归档一条正在跑的会话，但那是**用户在手机上的一次误点**换来的主机上正在跑的工作被停掉。
+> 不可逆的损失，且违反"插件不改变宿主自己的行为"这条纪律。所以正确行为是明确拒绝，
+> 让用户回工作台停 —— 代价是他要多走几步，收益是不会误伤。
+>
+> **A3 为什么 host 自己不推就行**：归档这件事本端是知道的（它刚做完），
+> 而 `workspace/changes` 那一帧只有 `{turn:N}`、不含"改了哪些文件"
+> （伞仓 HANDOFF §8 P0-2 的取证结论），从中**推不出**归档了哪一条。
+> 等下一次周期刷新会让用户看着列表没变而以为没生效。
 
 ### 10.5 会话与离线
 
@@ -842,6 +862,7 @@ ev.host_info {
 
 `cmd.send_prompt` `cmd.answer` `cmd.resolve_permission` `cmd.interrupt`
 `cmd.list_sessions` `cmd.keep_awake` `cmd.session_history` `cmd.new_session` `cmd.get_pending`
+`cmd.archive_session`
 
 ### 17.3 事件名
 
@@ -863,6 +884,7 @@ ev.host_info {
 | `drc.payload.new-session.workspace` | 支持 `cmd.new_session.workspace`   |
 | `drc.payload.get-pending`           | 支持 `cmd.get_pending`             |
 | `drc.payload.keep-awake`            | 支持防休眠                         |
+| `drc.payload.archive-session`       | 支持 `cmd.archive_session`         |
 | `drc.payload.model`                 | 支持 `ev.model`                    |
 | `drc.payload.retry-compaction`      | 支持 `ev.retry` / `ev.compaction`  |
 | `drc.cmd.idempotency`               | 声明本端做了 §10.2 的去重          |

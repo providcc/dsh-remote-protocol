@@ -123,6 +123,7 @@ export const CMD_TYPES: readonly CmdPayload['t'][] = [
   PAYLOAD_TYPES.cmdSessionHistory,
   PAYLOAD_TYPES.cmdNewSession,
   PAYLOAD_TYPES.cmdGetPending,
+  PAYLOAD_TYPES.cmdArchiveSession,
 ]
 type _CmdNamesMatchUnion = _Assert<
   Exclude<CmdPayload['t'], (typeof CMD_TYPES)[number]> extends never
@@ -193,6 +194,7 @@ export const CAPABILITY_IDS = [
   'drc.payload.new-session.workspace',
   'drc.payload.get-pending',
   'drc.payload.keep-awake',
+  'drc.payload.archive-session',
   'drc.payload.model',
   'drc.payload.retry-compaction',
   'drc.cmd.idempotency',
@@ -215,6 +217,7 @@ export const CAPABILITY_DESCRIPTIONS: Readonly<Record<CapabilityId, string>> = {
   'drc.payload.new-session.workspace': '支持 cmd.new_session.workspace',
   'drc.payload.get-pending': '支持 cmd.get_pending',
   'drc.payload.keep-awake': '支持防休眠开关',
+  'drc.payload.archive-session': '支持 cmd.archive_session（归档/取消归档，不含 stopActivity）',
   'drc.payload.model': '支持 ev.model',
   'drc.payload.retry-compaction': '支持 ev.retry / ev.compaction',
   'drc.cmd.idempotency': '本端按 cmdId 去重（规范 §10.2）',
